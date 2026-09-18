@@ -1,0 +1,44 @@
+{
+  "name": "bamboohr-mcp",
+  "version": "3.0.0",
+  "description": "Read-only MCP server for BambooHR: employees, custom fields and tables, bulk reports, time off, training, holidays.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mikkmihkel/bamboohr-mcp.git"
+  },
+  "homepage": "https://github.com/mikkmihkel/bamboohr-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/mikkmihkel/bamboohr-mcp/issues"
+  },
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "bin": {
+    "bamboohr-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/index.js",
+    "bundle": "bash scripts/build-bundle.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

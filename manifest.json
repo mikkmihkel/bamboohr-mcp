@@ -1,0 +1,74 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest-v0.2.schema.json",
+  "manifest_version": "0.2",
+  "name": "bamboohr-mcp",
+  "display_name": "BambooHR",
+  "version": "3.0.0",
+  "description": "Ask Claude about your BambooHR data: employees, custom fields, tables, time off, training and holidays. Read-only.",
+  "long_description": "Connects Claude Desktop to BambooHR with your own API key. You see exactly what you can see in BambooHR. The connector never creates, approves or changes anything.",
+  "author": {
+    "name": "Mikk Mihkel Vaabel"
+  },
+  "license": "MIT",
+  "keywords": ["bamboohr", "hr", "time off", "vacation", "employees", "custom fields"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "BAMBOOHR_TOKEN": "${user_config.bamboohr_token}",
+        "BAMBOOHR_COMPANY_DOMAIN": "${user_config.company_domain}",
+        "BAMBOOHR_VACATION_TYPE": "${user_config.vacation_type}"
+      }
+    }
+  },
+  "user_config": {
+    "bamboohr_token": {
+      "type": "string",
+      "title": "BambooHR API key",
+      "description": "Your personal API key. Create it in BambooHR: profile photo (bottom left) > API Keys > Add New Key.",
+      "sensitive": true,
+      "required": true
+    },
+    "company_domain": {
+      "type": "string",
+      "title": "Company subdomain",
+      "description": "Only the first part of the address. If BambooHR opens at acme.bamboohr.com, enter: acme",
+      "required": true
+    },
+    "vacation_type": {
+      "type": "string",
+      "title": "Vacation time-off type (optional)",
+      "description": "Fill in only if the tool says it cannot identify the vacation type. Use the exact name shown in BambooHR.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "tools": [
+    { "name": "bamboohr_whos_out", "description": "Who is out of office and company holidays in a range" },
+    { "name": "bamboohr_list_employees", "description": "Current employees from the company directory" },
+    { "name": "bamboohr_list_time_off_types", "description": "The company's time-off types and their ids" },
+    { "name": "bamboohr_time_off_balances", "description": "One employee's time-off balances as of a date" },
+    { "name": "bamboohr_time_off_requests", "description": "Time-off requests in a range, with filters" },
+    { "name": "bamboohr_vacation_overview", "description": "Unplanned vacation per employee and the 14-day check" },
+    { "name": "bamboohr_list_fields", "description": "Every employee field, standard and custom, with aliases" },
+    { "name": "bamboohr_list_tables", "description": "Employee tables and their columns, including custom tables" },
+    { "name": "bamboohr_get_employee", "description": "One employee's standard and custom field values" },
+    { "name": "bamboohr_employee_report", "description": "Chosen fields for every employee in one call" },
+    { "name": "bamboohr_table_rows", "description": "Rows of an employee table for one or all" },
+    { "name": "bamboohr_changed_employees", "description": "Employee records added, changed or removed since a time" },
+    { "name": "bamboohr_training_types", "description": "Training types and categories, including required ones" },
+    { "name": "bamboohr_training_records", "description": "One employee's completed trainings with dates and hours" },
+    { "name": "bamboohr_employee_dependents", "description": "Dependents recorded for one or all employees" },
+    { "name": "bamboohr_employee_files", "description": "Documents on an employee's record, metadata only" },
+    { "name": "bamboohr_list_users", "description": "BambooHR login accounts with status and last login" },
+    { "name": "bamboohr_company_holidays", "description": "Company holidays overlapping a date range" }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32"],
+    "runtimes": { "node": ">=20.0.0" }
+  }
+}
