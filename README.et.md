@@ -167,7 +167,7 @@ Saada personalitöötajatele link [viimasele väljalaskele](https://github.com/m
 
 - Paigaldusjuhend personalile: [docs/PAIGALDUSJUHEND.md](docs/PAIGALDUSJUHEND.md)
 - Skriptitud paigaldus: `echo "$KEY" | node dist/index.js enroll --subdomain firma --key-stdin` loeb võtme standardsisendist, nii et see ei satu käsureale ega käsuajalukku.
-- Uue versiooni väljaandmiseks tõsta `version` failides `package.json` ja `manifest.json`, lisa `CHANGELOG.md`-sse jaotis, loo silt `vX.Y.Z` ja lükka see üles. Väljalasketöövoog ehitab, allkirjastab ja avaldab paketi. `npm run bundle` ehitab kohapeal testimiseks allkirjastamata koopia; see on teadlikult git-ignoreeritud.
+- Uue versiooni väljaandmiseks tõsta `version` failides `package.json` ja `manifest.json`, lisa `CHANGELOG.md`-sse jaotis, loo silt `vX.Y.Z` ja lükka see üles, või käivita **Release**-töövoog käsitsi, andes versiooni sisendina. Mõlemal juhul töövoog ehitab, allkirjastab ja avaldab paketi ning käsitsi käivitamisel loob ka sildi. `npm run bundle` ehitab kohapeal testimiseks allkirjastamata koopia; see on teadlikult git-ignoreeritud.
 
 ## Näidisküsimused
 
