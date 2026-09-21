@@ -5,10 +5,9 @@
 #
 # Supply chain notes:
 # - Dependencies are installed from the committed lockfile with scripts disabled.
-# - The mcpb CLI runs at build time only, through npx at a pinned version, and is
-#   never part of the shipped bundle or of the runtime config. It is not a dev
-#   dependency because its interactive prompt libraries carry advisories we
-#   never want in node_modules.
+# - The mcpb CLI is an exact-pinned devDependency resolved from the lockfile and
+#   run with `npm exec --no`, so nothing is fetched at build time and it is
+#   never part of the shipped bundle or of the runtime config.
 # - Official releases are built by .github/workflows/release.yml, which also
 #   signs the bundle with Sigstore and attaches build provenance.
 set -euo pipefail
@@ -16,7 +15,6 @@ cd "$(dirname "$0")/.."
 
 STAGE=.bundle
 OUT=release/bamboohr-mcp.mcpb
-MCPB_VERSION=2.1.2
 
 npm run build
 rm -rf "$STAGE"
@@ -24,13 +22,13 @@ mkdir -p "$STAGE" release
 cp manifest.json package.json package-lock.json LICENSE "$STAGE/"
 cp assets/icon.png "$STAGE/icon.png"
 cp -R dist "$STAGE/dist"
-rm -f "$STAGE"/dist/*.map
+find "$STAGE/dist" -name "*.map" -delete
 
 # Production dependencies only; the bundle must run without the dev toolchain.
 (cd "$STAGE" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --silent)
 
-npx --yes "@anthropic-ai/mcpb@$MCPB_VERSION" validate "$STAGE/manifest.json"
-npx --yes "@anthropic-ai/mcpb@$MCPB_VERSION" pack "$STAGE" "$OUT"
-npx --yes "@anthropic-ai/mcpb@$MCPB_VERSION" info "$OUT"
+npm exec --no -- mcpb validate "$STAGE/manifest.json"
+npm exec --no -- mcpb pack "$STAGE" "$OUT"
+npm exec --no -- mcpb info "$OUT"
 
 (cd release && sha256sum bamboohr-mcp.mcpb > SHA256SUMS && cat SHA256SUMS)

@@ -12,8 +12,10 @@ yarn-error.log*
 .idea/
 .vscode/
 coverage/
-# Bundle staging directory (release/*.mcpb is committed)
+# Bundle staging directory and locally built bundles. Release artifacts are
+# built, signed and published only by .github/workflows/release.yml.
 .bundle/
+release/
 
 # Internal planning docs, kept outside the public repo
 docs/superpowers/

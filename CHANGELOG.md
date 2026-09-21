@@ -23,6 +23,17 @@ Security hardening release. Upgrading from 3.x requires running `enroll` once; s
 - Start-up self-check against a version revocation list (`revocations.json`); a revoked version refuses to start.
 - Signed releases: the GitHub Actions release workflow builds the bundle, signs it with Sigstore and attaches SLSA build provenance and SHA-256 checksums. Third-party actions are pinned to commit SHAs.
 - Plugin icon and use cases in the extension manifest.
+- Optional explicit custom-field allow-list (`enroll --allow-custom-field`, `--no-custom-fields`), plus a field-type check that refuses currency, national id, bank and protected-characteristic types.
+
+### Fixed after security review
+
+- Blocked-name patterns were anchored and English-only; they are now unanchored and cover Estonian vocabulary (töötasu, palk, pangakonto, sünniaeg and others).
+- Health-related time-off types could be selected by id; they are now hidden from the type list and refused as a filter, and reduced requests also drop the amount. Detection includes `töövõimetusleht`.
+- `bamboohr_changed_employees` had no record cap.
+- Envelope markers now carry a per-call nonce and look-alikes inside data are neutralised; error texts that can carry BambooHR content are enveloped too.
+- The macOS enrolment passed the key on the `security` command line; it is now sent on standard input via `security -i`. Helper binaries are called by absolute path, PowerShell uses `-LiteralPath`.
+- The bundler is an exact-pinned devDependency instead of an `npx` download, release permissions are job-scoped, source maps are fully stripped, and release binaries are no longer committed.
+- Whitespace-only filters no longer satisfy the filter requirement; free-form parameters are validated and truncated before they reach the audit log; a non-https revocation URL is ignored.
 
 ## 3.0.0
 

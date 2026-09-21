@@ -3,21 +3,22 @@ name: Release
 # Builds the Claude Desktop bundle from a version tag, signs it with Sigstore
 # (keyless, bound to this repository's GitHub identity), attaches SLSA build
 # provenance and publishes a GitHub release. Nothing is built on a laptop and
-# nothing is fetched with `npx -y` at runtime: the bundle is a fixed artifact
-# that users install by absolute path.
+# nothing is fetched with `npx` at build or run time: every tool comes from the
+# lockfile, and the bundle is a fixed artifact that users install by absolute path.
 on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
-permissions:
-  contents: write      # create the release and upload assets
-  id-token: write      # Sigstore keyless signing + provenance attestation
-  attestations: write
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release and upload assets
+      id-token: write      # Sigstore keyless signing + provenance attestation
+      attestations: write
     steps:
       # Third-party actions are pinned to full commit SHAs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
