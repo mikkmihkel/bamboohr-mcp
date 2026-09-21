@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveAppPaths, type AppPaths } from "../src/appPaths";
-import { createCredentialStore, CredentialStoreError, type ExecFn } from "../src/credentialStore";
+import { createCredentialStore, CredentialStoreError, toolPath, type ExecFn } from "../src/credentialStore";
 
 const SECRET = "bamboo-api-key-0123456789";
 
@@ -45,14 +45,55 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+describe("toolPath", () => {
+  it("returns the first candidate that exists", () => {
+    const exists = (p: string) => p === "/usr/local/bin/secret-tool";
+    expect(toolPath(["/usr/bin/secret-tool", "/usr/local/bin/secret-tool"], "secret-tool", exists)).toBe(
+      "/usr/local/bin/secret-tool"
+    );
+  });
+
+  it("falls back to the bare name when no candidate exists", () => {
+    expect(toolPath(["/nope/security"], "security", () => false)).toBe("security");
+  });
+
+  it("treats a candidate that cannot be tested as absent", () => {
+    expect(
+      toolPath(["/nope/security"], "security", () => {
+        throw new Error("EACCES");
+      })
+    ).toBe("security");
+  });
+});
+
 describe("macOS keychain backend", () => {
-  it("stores with add-generic-password -U", async () => {
+  it("stores the secret on stdin with `security -i`, never in argv", async () => {
     const { exec, calls } = fakeExec([{}]);
     const store = createCredentialStore(paths, "darwin", exec);
     expect(store.backend).toBe("macos-keychain");
     await store.set(SECRET);
-    expect(calls[0]!.file).toBe("security");
-    expect(calls[0]!.args.slice(0, 6)).toEqual(["add-generic-password", "-U", "-s", "bamboohr-mcp", "-a", "api-key"]);
+    // An argv entry is readable from the process list by every other process on the machine.
+    expect(calls[0]!.file).toMatch(/(^|\/)security$/);
+    expect(calls[0]!.args).toEqual(["-i"]);
+    expect(calls[0]!.args.join(" ")).not.toContain(SECRET);
+    expect(calls[0]!.input).toBe(`add-generic-password -U -s bamboohr-mcp -a api-key -w "${SECRET}"\n`);
+  });
+
+  it("refuses a key that the interactive command line cannot carry safely", async () => {
+    for (const bad of ['key with space', 'key"quote', "key\\backslash"]) {
+      const { exec, calls } = fakeExec([{}]);
+      const err = await createCredentialStore(paths, "darwin", exec).set(bad).catch((e) => e);
+      expect(err).toBeInstanceOf(CredentialStoreError);
+      expect(err.message).not.toContain(bad);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("treats output on stderr as a failed store even when the exit code is 0", async () => {
+    const { exec } = fakeExec([{ code: 0, stderr: "security: SecKeychainItemCreateFromContent failed" }]);
+    const err = await createCredentialStore(paths, "darwin", exec).set(SECRET).catch((e) => e);
+    expect(err).toBeInstanceOf(CredentialStoreError);
+    expect(err.message).toMatch(/Cannot store the API key/);
   });
 
   it("reads the key and strips the trailing newline", async () => {
@@ -85,7 +126,7 @@ describe("Linux Secret Service backend", () => {
     const store = createCredentialStore(paths, "linux", exec);
     expect(store.backend).toBe("linux-secret-service");
     await store.set(SECRET);
-    expect(calls[0]!.file).toBe("secret-tool");
+    expect(calls[0]!.file).toMatch(/(^|\/)secret-tool$/);
     expect(calls[0]!.args).toEqual([
       "store", "--label=bamboohr-mcp API key", "service", "bamboohr-mcp", "account", "api-key",
     ]);
@@ -134,13 +175,16 @@ describe("Windows DPAPI backend", () => {
     const store = createCredentialStore(paths, "win32", exec, env);
     expect(store.backend).toBe("windows-dpapi");
     await store.set(SECRET);
-    expect(calls[0]!.file).toBe("powershell");
+    expect(calls[0]!.file).toMatch(/(^|[\\/])powershell(\.exe)?$/i);
     expect(calls[0]!.args.slice(0, 3)).toEqual(["-NoProfile", "-NonInteractive", "-Command"]);
     expect(calls[0]!.args[3]).toContain("ConvertFrom-SecureString");
     expect(calls[0]!.args[3]).toContain(paths.credentialFile);
+    // -LiteralPath: a path with [ ] in it must not be read as a wildcard pattern.
+    expect(calls[0]!.args[3]).toContain("-LiteralPath");
+    expect(calls[0]!.args[3]).not.toMatch(/-Path /);
     expect(calls[0]!.args.join(" ")).not.toContain(SECRET);
     expect(calls[0]!.input).toBe(SECRET);
-    expect(calls[1]!.file).toBe("icacls");
+    expect(calls[1]!.file).toMatch(/(^|[\\/])icacls(\.exe)?$/i);
     expect(calls[1]!.args).toEqual([paths.credentialFile, "/inheritance:r", "/grant:r", "anna:F"]);
   });
 
@@ -156,6 +200,8 @@ describe("Windows DPAPI backend", () => {
     const { exec, calls } = fakeExec([{ stdout: SECRET }]);
     await expect(createCredentialStore(paths, "win32", exec, env).get()).resolves.toBe(SECRET);
     expect(calls[0]!.args[3]).toContain("ConvertTo-SecureString");
+    expect(calls[0]!.args[3]).toContain("-LiteralPath");
+    expect(calls[0]!.args[3]).not.toMatch(/-Path /);
   });
 
   it("deletes the blob and tolerates it being gone", async () => {

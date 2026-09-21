@@ -146,6 +146,47 @@ describe("enroll", () => {
     });
   });
 
+  it("stores a repeatable custom-field allow-list", async () => {
+    const { store } = fakeStore();
+    const code = await runCli(
+      [
+        "enroll", "--subdomain", "acme", "--key-stdin",
+        "--allow-custom-field", "customShoeSize",
+        "--allow-custom-field", "customEquipment",
+      ],
+      deps({ store, readStdin: async () => KEY })
+    );
+    expect(code).toBe(0);
+    expect(readSettings(paths, {}).allowedCustomFields).toEqual(["customShoeSize", "customEquipment"]);
+    expect(out.join("\n")).toContain("custom fields:     customShoeSize, customEquipment");
+  });
+
+  it("refuses every custom field with --no-custom-fields", async () => {
+    const { store } = fakeStore();
+    expect(
+      await runCli(["enroll", "--subdomain", "acme", "--key-stdin", "--no-custom-fields"], deps({ store, readStdin: async () => KEY }))
+    ).toBe(0);
+    expect(readSettings(paths, {}).allowedCustomFields).toEqual([]);
+    expect(out.join("\n")).toContain("custom fields:     none");
+  });
+
+  it("refuses to combine --no-custom-fields with --allow-custom-field", async () => {
+    const { store } = fakeStore();
+    const code = await runCli(
+      ["enroll", "--subdomain", "acme", "--key-stdin", "--no-custom-fields", "--allow-custom-field", "customShoeSize"],
+      deps({ store, readStdin: async () => KEY })
+    );
+    expect(code).toBe(2);
+    expect(err.join("\n")).toMatch(/mutually exclusive/);
+  });
+
+  it("leaves the custom-field rule automatic when neither flag is given", async () => {
+    const { store } = fakeStore();
+    await runCli(["enroll", "--subdomain", "acme", "--key-stdin"], deps({ store, readStdin: async () => KEY }));
+    expect(readSettings(paths, {}).allowedCustomFields).toBeUndefined();
+    expect(out.join("\n")).toContain("custom fields:     auto");
+  });
+
   it("rejects an unknown option", async () => {
     const { store } = fakeStore();
     expect(await runCli(["enroll", "--api-key", KEY], deps({ store }))).toBe(2);
@@ -167,6 +208,7 @@ describe("status", () => {
     expect(text).toContain(paths.configFile);
     expect(text).toContain(paths.logDir);
     expect(text).toContain("company domain:    acme");
+    expect(text).toContain("custom fields:     auto");
     expect(text).toContain("4.0.0");
     expect(text).not.toContain(KEY);
   });

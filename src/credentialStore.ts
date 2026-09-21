@@ -36,6 +36,40 @@ const EXEC_TIMEOUT_MS = 15_000;
 export const SERVICE = "bamboohr-mcp";
 export const ACCOUNT = "api-key";
 
+/**
+ * Resolve an OS helper to an absolute path when one of the known locations exists, so a
+ * "security" or "secret-tool" earlier on PATH cannot stand in for the real tool and collect the
+ * API key. Falls back to the bare name (PATH lookup) when none of the candidates is present,
+ * because refusing to run at all would be worse than the status quo on unusual installs.
+ */
+export function toolPath(
+  candidates: readonly string[],
+  fallback: string,
+  exists: (p: string) => boolean = fs.existsSync
+): string {
+  for (const candidate of candidates) {
+    try {
+      if (exists(candidate)) return candidate;
+    } catch {
+      /* an unreadable candidate is simply not a candidate */
+    }
+  }
+  return fallback;
+}
+
+const SECURITY_PATHS = ["/usr/bin/security"];
+const SECRET_TOOL_PATHS = ["/usr/bin/secret-tool", "/usr/local/bin/secret-tool"];
+
+function powershellPath(env: NodeJS.ProcessEnv): string {
+  const root = env.SystemRoot?.trim() || "C:\\Windows";
+  return toolPath([`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`], "powershell");
+}
+
+function icaclsPath(env: NodeJS.ProcessEnv): string {
+  const root = env.SystemRoot?.trim() || "C:\\Windows";
+  return toolPath([`${root}\\System32\\icacls.exe`], "icacls");
+}
+
 /** macOS `security` exits 44 when the item does not exist. */
 const SECURITY_NOT_FOUND = 44;
 
@@ -72,9 +106,10 @@ function stripTrailingNewline(text: string): string {
 
 function createMacStore(exec: ExecFn): CredentialStore {
   const hint = "Unlock the login keychain and try again (Keychain Access > login).";
-  const run = async (args: string[], secret?: string) => {
+  const security = toolPath(SECURITY_PATHS, "security");
+  const run = async (args: string[], input?: string, secret?: string) => {
     try {
-      return await exec("security", args);
+      return await exec(security, args, input);
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
@@ -94,14 +129,23 @@ function createMacStore(exec: ExecFn): CredentialStore {
       return value === "" ? undefined : value;
     },
     async set(secret) {
-      // `security` has no way to take the secret on stdin (its -w prompt reads
-      // the tty), so the value is an argv entry of a short-lived local process.
-      // This is the documented way to script the keychain; -U updates in place.
-      const { code, stderr } = await run(
-        ["add-generic-password", "-U", "-s", SERVICE, "-a", ACCOUNT, "-w", secret],
-        secret
-      );
-      if (code !== 0) throw new CredentialStoreError(`Cannot store the API key in the keychain: ${redact(stderr, secret)}`, hint);
+      // `security -i` reads its commands from stdin, so the key never becomes an argv entry
+      // that every other process on the machine could read out of the process list.
+      // The command line it reads is whitespace-separated and understands double quotes, so a
+      // key containing whitespace, a quote or a backslash is refused rather than mis-parsed —
+      // BambooHR API keys are alphanumeric.
+      if (/[\s"\\]/.test(secret)) {
+        throw new CredentialStoreError(
+          "The API key contains whitespace, a double quote or a backslash and cannot be stored in the macOS keychain",
+          "Check the key you pasted: a BambooHR API key is alphanumeric, with no spaces."
+        );
+      }
+      const command = `add-generic-password -U -s ${SERVICE} -a ${ACCOUNT} -w "${secret}"\n`;
+      const { code, stderr } = await run(["-i"], command, secret);
+      // In interactive mode a failed sub-command reports on stderr; a successful add says nothing.
+      if (code !== 0 || stderr.trim() !== "") {
+        throw new CredentialStoreError(`Cannot store the API key in the keychain: ${redact(stderr, secret)}`, hint);
+      }
     },
     async delete() {
       const { code, stderr } = await run(["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT]);
@@ -119,9 +163,10 @@ function psQuote(value: string): string {
 function createWindowsStore(paths: AppPaths, exec: ExecFn, env: NodeJS.ProcessEnv): CredentialStore {
   const file = paths.credentialFile;
   const hint = "Run the enroll subcommand again from the same Windows account; DPAPI blobs are user- and machine-bound.";
+  const powershell = powershellPath(env);
   const runPs = async (script: string, input?: string, secret?: string) => {
     try {
-      return await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], input);
+      return await exec(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], input);
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
@@ -137,7 +182,8 @@ function createWindowsStore(paths: AppPaths, exec: ExecFn, env: NodeJS.ProcessEn
       if (!fs.existsSync(file)) return undefined;
       const script =
         "$ErrorActionPreference = 'Stop'; " +
-        `$enc = Get-Content -Raw -Path ${psQuote(file)}; ` +
+        // -LiteralPath: the path must never be read as a wildcard pattern.
+        `$enc = Get-Content -Raw -LiteralPath ${psQuote(file)}; ` +
         "$sec = ConvertTo-SecureString -String $enc; " +
         "[Console]::Out.Write([System.Net.NetworkCredential]::new('', $sec).Password)";
       const { code, stdout, stderr } = await runPs(script);
@@ -153,7 +199,7 @@ function createWindowsStore(paths: AppPaths, exec: ExecFn, env: NodeJS.ProcessEn
         "$ErrorActionPreference = 'Stop'; " +
         '$s = [Console]::In.ReadToEnd().TrimEnd("`r","`n"); ' +
         "$sec = ConvertTo-SecureString -String $s -AsPlainText -Force; " +
-        `ConvertFrom-SecureString -SecureString $sec | Set-Content -NoNewline -Path ${psQuote(file)}`;
+        `ConvertFrom-SecureString -SecureString $sec | Set-Content -NoNewline -LiteralPath ${psQuote(file)}`;
       const { code, stderr } = await runPs(script, secret, secret);
       if (code !== 0) throw new CredentialStoreError(`Cannot store the API key with DPAPI: ${redact(stderr, secret)}`, hint);
       await restrictWindowsAcl(file, exec, env);
@@ -175,7 +221,7 @@ async function restrictWindowsAcl(file: string, exec: ExecFn, env: NodeJS.Proces
   const user = env.USERNAME?.trim();
   if (!user) return;
   try {
-    await exec("icacls", [file, "/inheritance:r", "/grant:r", `${user}:F`]);
+    await exec(icaclsPath(env), [file, "/inheritance:r", "/grant:r", `${user}:F`]);
   } catch {
     // The DPAPI blob is already useless to other users; tightening the ACL is a bonus.
   }
@@ -184,9 +230,10 @@ async function restrictWindowsAcl(file: string, exec: ExecFn, env: NodeJS.Proces
 function createLinuxStore(exec: ExecFn): CredentialStore {
   const missingHint = "install libsecret-tools (Debian/Ubuntu: apt install libsecret-tools; Fedora: dnf install libsecret)";
   const hint = "Make sure a Secret Service provider (GNOME Keyring, KWallet) is running and unlocked.";
+  const secretTool = toolPath(SECRET_TOOL_PATHS, "secret-tool");
   const run = async (args: string[], input?: string, secret?: string) => {
     try {
-      return await exec("secret-tool", args, input);
+      return await exec(secretTool, args, input);
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") throw new CredentialStoreError("`secret-tool` is not installed", missingHint);

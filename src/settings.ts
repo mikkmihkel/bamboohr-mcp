@@ -14,6 +14,11 @@ export interface Settings {
   vacationType?: string;
   /** Gates the tools that expose dependents and employee files. */
   enableSensitiveTools: boolean;
+  /**
+   * Custom-field aliases this install allows. Unset keeps the automatic rule (any custom field
+   * that is not blocked by name or type); an empty array refuses every custom field.
+   */
+  allowedCustomFields?: string[];
   /** Per-call record cap, 1..500. */
   maxRecords: number;
   /** Where the start-up self-check looks for revoked versions. */
@@ -61,6 +66,27 @@ function asBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
+/**
+ * A list of custom-field aliases, from a JSON array or a comma-separated environment variable.
+ * An explicitly empty value ("" or []) means "no custom fields at all", so it must survive as an
+ * empty array rather than collapsing to undefined.
+ */
+function asAliasList(value: unknown): string[] | undefined {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : undefined;
+  if (raw === undefined) return undefined;
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (trimmed !== "" && !out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
+}
+
 function asRecordCap(value: unknown): number | undefined {
   const n = typeof value === "number" ? value : Number(asString(value));
   if (!Number.isInteger(n) || n < MIN_MAX_RECORDS || n > MAX_MAX_RECORDS) return undefined;
@@ -94,6 +120,7 @@ function apply(into: Settings, layer: {
   companyDomain?: unknown;
   vacationType?: unknown;
   enableSensitiveTools?: unknown;
+  allowedCustomFields?: unknown;
   maxRecords?: unknown;
   revocationUrl?: unknown;
   strictSelfCheck?: unknown;
@@ -104,10 +131,15 @@ function apply(into: Settings, layer: {
   if (vacationType !== undefined) into.vacationType = vacationType;
   const enableSensitiveTools = asBoolean(layer.enableSensitiveTools);
   if (enableSensitiveTools !== undefined) into.enableSensitiveTools = enableSensitiveTools;
+  const allowedCustomFields = asAliasList(layer.allowedCustomFields);
+  if (allowedCustomFields !== undefined) into.allowedCustomFields = allowedCustomFields;
   const maxRecords = asRecordCap(layer.maxRecords);
   if (maxRecords !== undefined) into.maxRecords = maxRecords;
+  // A non-https revocation URL is ignored, not honoured: the self-check would otherwise be
+  // downgraded to plain http (or a file: URL) by anyone who can edit config.json or the
+  // environment, and a revoked build would keep starting.
   const revocationUrl = asString(layer.revocationUrl);
-  if (revocationUrl !== undefined) into.revocationUrl = revocationUrl;
+  if (revocationUrl !== undefined && isHttpsUrl(revocationUrl)) into.revocationUrl = revocationUrl;
   const strictSelfCheck = asBoolean(layer.strictSelfCheck);
   if (strictSelfCheck !== undefined) into.strictSelfCheck = strictSelfCheck;
 }
@@ -124,6 +156,7 @@ export function readSettings(paths: AppPaths, env: NodeJS.ProcessEnv = process.e
     companyDomain: env.BAMBOOHR_COMPANY_DOMAIN,
     vacationType: env.BAMBOOHR_VACATION_TYPE,
     enableSensitiveTools: env.BAMBOOHR_ENABLE_SENSITIVE_TOOLS,
+    allowedCustomFields: env.BAMBOOHR_ALLOWED_CUSTOM_FIELDS,
     maxRecords: env.BAMBOOHR_MAX_RECORDS,
     revocationUrl: env.BAMBOOHR_REVOCATION_URL,
     strictSelfCheck: env.BAMBOOHR_STRICT_SELF_CHECK,
@@ -153,6 +186,10 @@ export function writeSettings(paths: AppPaths, patch: Partial<Settings>): void {
   if (patch.revocationUrl !== undefined) {
     const url = asString(patch.revocationUrl);
     if (!url || !isHttpsUrl(url)) throw new SettingsError(`revocationUrl must be an https URL, got "${patch.revocationUrl}"`);
+  }
+
+  if (patch.allowedCustomFields !== undefined && !Array.isArray(patch.allowedCustomFields)) {
+    throw new SettingsError("allowedCustomFields must be an array of custom field aliases");
   }
 
   const current = readFileSettings(paths.configFile);

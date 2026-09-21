@@ -25,6 +25,33 @@ describe("bamboohr_list_fields", () => {
     });
   });
 
+  it("marks a custom field of a sensitive type as not allowed, whatever it is called", async () => {
+    const api = fakeApi({
+      getFields: vi.fn(async () => [
+        { id: "5000", name: "Extra info", alias: "customExtraInfo", type: "currency" },
+        { id: "5001", name: "Locker", alias: "customLocker", type: "text" },
+      ]),
+    });
+    const { client } = await connect(api);
+    const res = await client.callTool({ name: "bamboohr_list_fields", arguments: {} });
+    expect(Object.fromEntries(parseToolPayload(res).map((f: any) => [f.alias, f.allowed]))).toEqual({
+      customExtraInfo: false,
+      customLocker: true,
+    });
+  });
+
+  it("follows the configured custom-field allow-list, so the flag matches what is really sent", async () => {
+    const { client } = await connect(fakeApi(), { settings: { allowedCustomFields: ["customShoeSize"] } });
+    const res = await client.callTool({ name: "bamboohr_list_fields", arguments: {} });
+    const byAlias = Object.fromEntries(parseToolPayload(res).map((f: any) => [f.alias, f.allowed]));
+    expect(byAlias).toMatchObject({ firstName: true, customShoeSize: true, customBonusScheme: false });
+
+    const { client: none } = await connect(fakeApi(), { settings: { allowedCustomFields: [] } });
+    const noCustom = await none.callTool({ name: "bamboohr_list_fields", arguments: {} });
+    const byAliasNone = Object.fromEntries(parseToolPayload(noCustom).map((f: any) => [f.alias, f.allowed]));
+    expect(byAliasNone).toMatchObject({ firstName: true, customShoeSize: false });
+  });
+
   it("logs that a search word was used, never the word itself", async () => {
     const { client, audit } = await connect(fakeApi());
     await client.callTool({ name: "bamboohr_list_fields", arguments: { search: "shoe" } });

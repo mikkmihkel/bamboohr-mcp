@@ -4,7 +4,7 @@ import { createHmac } from "node:crypto";
 import { expect, vi } from "vitest";
 import type { AuditEntry, AuditLog } from "../src/audit";
 import type { BambooHRApi } from "../src/bamboohr";
-import { DATA_BEGIN, DATA_END, DATA_ENVELOPE_HEADER } from "../src/policy";
+import { DATA_ENVELOPE_HEADER, DATA_ENVELOPE_RE, dataBegin, dataEnd } from "../src/policy";
 import { createServer, type ServerOptions } from "../src/server";
 
 export const TODAY = "2026-09-14";
@@ -19,13 +19,23 @@ export function toolText(result: unknown): string {
  * result must go through this, which is what keeps the envelope from silently disappearing.
  */
 export function parseToolPayload(result: unknown): any {
-  const text = toolText(result);
+  return JSON.parse(envelopeBody(toolText(result)));
+}
+
+/**
+ * Assert the data envelope is present, that its markers carry the nonce the header names, and
+ * return the text between them. Every result the model sees must go through this.
+ */
+export function envelopeBody(text: string): string {
   expect(text.startsWith(DATA_ENVELOPE_HEADER), "result is not enveloped").toBe(true);
-  const from = text.indexOf(DATA_BEGIN);
-  const to = text.indexOf(DATA_END);
-  expect(from).toBeGreaterThanOrEqual(0);
-  expect(to).toBeGreaterThan(from);
-  return JSON.parse(text.slice(from + DATA_BEGIN.length, to));
+  const match = DATA_ENVELOPE_RE.exec(text);
+  expect(match, "result has no nonce-tagged data block").not.toBeNull();
+  const [, nonce, body] = match!;
+  // The header must name the same nonce as the markers, and the markers must be the only ones.
+  expect(text).toContain(nonce);
+  expect(text.indexOf(dataBegin(nonce))).toBeGreaterThan(text.indexOf(nonce));
+  expect(text.endsWith(dataEnd(nonce))).toBe(true);
+  return body;
 }
 
 export interface RecordingAudit extends AuditLog {

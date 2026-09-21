@@ -101,18 +101,25 @@ class UsageError extends Error {}
 interface ParsedFlags {
   values: Record<string, string>;
   booleans: Record<string, boolean>;
+  /** Flags that may be given more than once, in the order they appeared. */
+  repeated: Record<string, string[]>;
 }
 
-/** Minimal flag parser: `--flag value` for the listed keys, `--flag` for the listed switches. */
-function parseFlags(args: string[], withValue: string[], switches: string[]): ParsedFlags {
+/**
+ * Minimal flag parser: `--flag value` for the listed keys, `--flag` for the listed switches and
+ * `--flag value` (repeatable, collected into a list) for the listed repeatable keys.
+ */
+function parseFlags(args: string[], withValue: string[], switches: string[], repeatable: string[] = []): ParsedFlags {
   const values: Record<string, string> = {};
   const booleans: Record<string, boolean> = {};
+  const repeated: Record<string, string[]> = {};
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
-    if (withValue.includes(arg)) {
+    if (withValue.includes(arg) || repeatable.includes(arg)) {
       const value = args[i + 1];
       if (value === undefined || value.startsWith("--")) throw new UsageError(`${arg} needs a value`);
-      values[arg] = value;
+      if (repeatable.includes(arg)) (repeated[arg] ??= []).push(value);
+      else values[arg] = value;
       i += 1;
     } else if (switches.includes(arg)) {
       booleans[arg] = true;
@@ -120,7 +127,14 @@ function parseFlags(args: string[], withValue: string[], switches: string[]): Pa
       throw new UsageError(`unknown option "${arg}"`);
     }
   }
-  return { values, booleans };
+  return { values, booleans, repeated };
+}
+
+/** How the enrolled custom-field rule reads in `status` and after `enroll`. */
+function customFieldsLine(allowed: string[] | undefined): string {
+  if (allowed === undefined) return "auto (any custom field that is not sensitive)";
+  if (allowed.length === 0) return "none (every custom field is refused)";
+  return allowed.join(", ");
 }
 
 function settingsLines(settings: Settings): string[] {
@@ -128,6 +142,7 @@ function settingsLines(settings: Settings): string[] {
     `company domain:    ${settings.companyDomain ?? "(not set)"}`,
     `vacation type:     ${settings.vacationType ?? "(auto-detected)"}`,
     `sensitive tools:   ${settings.enableSensitiveTools ? "enabled" : "disabled"}`,
+    `custom fields:     ${customFieldsLine(settings.allowedCustomFields)}`,
     `max records:       ${settings.maxRecords}`,
     `revocation url:    ${settings.revocationUrl ?? DEFAULT_REVOCATION_URL}`,
     `strict self-check: ${settings.strictSelfCheck ? "on" : "off"}`,
@@ -146,7 +161,11 @@ async function enroll(argv: string[], deps: CliDeps): Promise<number> {
   const flags = parseFlags(
     argv,
     ["--subdomain", "--vacation-type", "--max-records", "--revocation-url"],
-    ["--enable-sensitive-tools", "--disable-sensitive-tools", "--strict-self-check", "--no-strict-self-check", "--key-stdin"]
+    [
+      "--enable-sensitive-tools", "--disable-sensitive-tools", "--strict-self-check",
+      "--no-strict-self-check", "--key-stdin", "--no-custom-fields",
+    ],
+    ["--allow-custom-field"]
   );
 
   const subdomain = (flags.values["--subdomain"] ?? (await deps.prompt("BambooHR subdomain (e.g. \"acme\" for acme.bamboohr.com): "))).trim();
@@ -175,6 +194,13 @@ async function enroll(argv: string[], deps: CliDeps): Promise<number> {
   if (flags.booleans["--enable-sensitive-tools"] && flags.booleans["--disable-sensitive-tools"]) {
     throw new UsageError("--enable-sensitive-tools and --disable-sensitive-tools are mutually exclusive");
   }
+  const allowCustom = flags.repeated["--allow-custom-field"];
+  if (flags.booleans["--no-custom-fields"] && allowCustom) {
+    throw new UsageError("--no-custom-fields and --allow-custom-field are mutually exclusive");
+  }
+  // An explicit list (or an explicit empty list) replaces the automatic custom-field rule.
+  if (flags.booleans["--no-custom-fields"]) patch.allowedCustomFields = [];
+  else if (allowCustom) patch.allowedCustomFields = allowCustom.map((a) => a.trim()).filter((a) => a !== "");
   if (flags.booleans["--enable-sensitive-tools"]) patch.enableSensitiveTools = true;
   if (flags.booleans["--disable-sensitive-tools"]) patch.enableSensitiveTools = false;
   if (flags.values["--revocation-url"]) patch.revocationUrl = flags.values["--revocation-url"];
@@ -307,6 +333,9 @@ const USAGE = [
   "  --vacation-type <name>          time-off type that counts as vacation",
   "  --max-records <n>               per-call record cap (1..500)",
   "  --enable-sensitive-tools | --disable-sensitive-tools",
+  "  --allow-custom-field <alias>    only this custom field may be read (repeatable);",
+  "                                  without it, any custom field that is not sensitive is allowed",
+  "  --no-custom-fields              refuse every custom field",
   "  --revocation-url <https url>    self-check document URL",
   "  --strict-self-check | --no-strict-self-check",
   "  --key-stdin                     read the API key from stdin instead of prompting;",

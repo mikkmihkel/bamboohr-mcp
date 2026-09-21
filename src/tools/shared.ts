@@ -1,10 +1,18 @@
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { AuditEntry, AuditLog } from "../audit";
 import type { BambooHRApi } from "../bamboohr";
 import { BambooHRApiError } from "../client";
 import { isISODate, type ISODate } from "../dates";
 import { VacationTypeNotFoundError } from "../overview";
-import { envelope, PolicyError, scrub, wrapUntrustedText, type FieldLookup } from "../policy";
+import {
+  envelope,
+  PolicyError,
+  scrub,
+  stripControlChars,
+  wrapUntrustedText,
+  type FieldLookup,
+} from "../policy";
 import type { Settings } from "../settings";
 
 export const READ_ONLY = {
@@ -67,26 +75,76 @@ function countRecords(result: unknown): number {
   return 1;
 }
 
+/** Longest filter value and field name the audit log will keep; the rest is a free-text risk. */
+export const MAX_AUDIT_VALUE_LENGTH = 64;
+
+function clip(value: string): string {
+  return value.length > MAX_AUDIT_VALUE_LENGTH ? `${value.slice(0, MAX_AUDIT_VALUE_LENGTH)}…` : value;
+}
+
+/**
+ * Audit values are truncated: the schemas keep free text out of the logged parameters, but a
+ * long value would still be the one place a caller could park arbitrary text in the log file.
+ */
+function clipValue(value: SafeFilterValue): SafeFilterValue {
+  if (typeof value === "string") return clip(value);
+  if (Array.isArray(value)) return value.map((v) => (typeof v === "string" ? clip(v) : v));
+  return value;
+}
+
 function safeFilters(filters: ToolMeta["filters"]): AuditEntry["filters"] | undefined {
   if (!filters) return undefined;
   const out: Record<string, SafeFilterValue> = {};
   for (const [key, value] of Object.entries(filters)) {
     if (value === undefined) continue;
-    out[key] = value;
+    out[key] = clipValue(value);
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-export function fail(error: unknown) {
+/** 16 hex characters of fresh randomness: the tag that marks this call's data block. */
+function newNonce(): string {
+  return randomBytes(8).toString("hex");
+}
+
+/**
+ * Error classes whose message is our own text, usually an instruction the user must follow
+ * (an enrolment command, a policy refusal). Those are NOT enveloped — the model should act on
+ * them. Every other message may echo BambooHR-originated content and is fenced as data.
+ */
+const OWN_MESSAGE_ERRORS: ReadonlySet<string> = new Set([
+  "PolicyError",
+  "NotEnrolledError",
+  "ConfigError",
+  "CredentialStoreError",
+  "SettingsError",
+  "ZodError",
+]);
+
+function isOwnMessage(error: unknown): boolean {
+  return error instanceof Error && OWN_MESSAGE_ERRORS.has(error.name);
+}
+
+/**
+ * Error text for the model. Control characters are always stripped; text that can carry
+ * BambooHR content goes through the same envelope as a successful payload, so a crafted field
+ * name or API error message cannot reach the model as bare, unfenced text.
+ */
+function failText(text: string, nonce: string, own: boolean) {
+  const clean = stripControlChars(text);
+  return { isError: true as const, content: [{ type: "text" as const, text: own ? clean : envelope(clean, nonce) }] };
+}
+
+export function fail(error: unknown, nonce: string) {
   const message = error instanceof Error ? error.message : String(error);
-  return { isError: true as const, content: [{ type: "text" as const, text: message }] };
+  return failText(message, nonce, isOwnMessage(error));
 }
 
 /** The one place a BambooHR payload becomes text for the model: scrub, fence, envelope. */
-function present(result: unknown): { text: string; scrubbedKeys: number } {
+function present(result: unknown, nonce: string): { text: string; scrubbedKeys: number } {
   const { value, removed } = scrub(result);
   const json = JSON.stringify(wrapUntrustedText(value), null, 2);
-  return { text: envelope(json), scrubbedKeys: removed };
+  return { text: envelope(json, nonce), scrubbedKeys: removed };
 }
 
 /**
@@ -96,6 +154,8 @@ function present(result: unknown): { text: string; scrubbedKeys: number } {
  */
 export async function run(ctx: ToolContext, meta: ToolMeta, fn: () => Promise<unknown>) {
   const started = Date.now();
+  // One nonce per call: it tags this call's data block, whether the call succeeds or fails.
+  const nonce = newNonce();
 
   const write = (entry: Omit<AuditEntry, "ts" | "tool" | "durationMs">): void => {
     const full: AuditEntry = {
@@ -104,7 +164,7 @@ export async function run(ctx: ToolContext, meta: ToolMeta, fn: () => Promise<un
       ...entry,
       durationMs: Date.now() - started,
     };
-    if (meta.fields?.length) full.fields = [...meta.fields];
+    if (meta.fields?.length) full.fields = meta.fields.map(clip);
     const filters = safeFilters(meta.filters);
     if (filters) full.filters = filters;
     const ids = (meta.employeeIds ?? []).filter((id): id is number | string => id !== undefined);
@@ -114,7 +174,7 @@ export async function run(ctx: ToolContext, meta: ToolMeta, fn: () => Promise<un
 
   try {
     const result = await fn();
-    const { text, scrubbedKeys } = present(result);
+    const { text, scrubbedKeys } = present(result, nonce);
     write({
       outcome: "ok",
       recordCount: meta.count ? meta.count(result) : countRecords(result),
@@ -125,25 +185,21 @@ export async function run(ctx: ToolContext, meta: ToolMeta, fn: () => Promise<un
     if (e instanceof PolicyError) {
       // "rejected" means the call was refused here, before any employee data was fetched.
       write({ outcome: "rejected", error: `PolicyError ${e.code}` });
-      return fail(e);
+      return fail(e, nonce);
     }
     if (e instanceof VacationTypeNotFoundError) {
       write({ outcome: "error", error: e.name });
-      return {
-        isError: true as const,
-        content: [
-          { type: "text" as const, text: JSON.stringify({ error: e.message, availableTypes: e.available }, null, 2) },
-        ],
-      };
+      // The message and the type names in it come from BambooHR: fenced like any other payload.
+      return failText(JSON.stringify({ error: e.message, availableTypes: e.available }, null, 2), nonce, false);
     }
     if (e instanceof BambooHRApiError) {
       write({ outcome: "error", error: `BambooHRApiError ${e.status}` });
-      return fail(e);
+      return fail(e, nonce);
     }
     // Everything else, including NotEnrolledError and credential-store failures: the message
     // carries the fix (e.g. the enrolment command), the log carries only the class name.
     write({ outcome: "error", error: e instanceof Error ? e.name : "Error" });
-    return fail(e);
+    return fail(e, nonce);
   }
 }
 

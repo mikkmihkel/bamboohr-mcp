@@ -1,20 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { mergeFieldOptions, searchFields } from "../fields";
-import { ALLOWED_STANDARD_FIELDS, enforceRecordLimit, isBlockedKey, isBlockedTable } from "../policy";
+import { enforceRecordLimit, isBlockedTable, resolveAllowedFields, type FieldPolicyOptions } from "../policy";
 import type { BambooUser, FieldMeta } from "../types";
 import { READ_ONLY, assertRange, isoDate, run, type ToolContext } from "./shared";
 
-/** True when this field may actually be requested from BambooHR (same rule as policy.resolveAllowedFields). */
-function isAllowedField(field: FieldMeta): boolean {
-  const alias = field.alias;
-  if (alias !== undefined && ALLOWED_STANDARD_FIELDS.has(alias)) return true;
-  return (
-    alias !== undefined &&
-    alias.toLowerCase().startsWith("custom") &&
-    !isBlockedKey(alias) &&
-    !isBlockedKey(field.name)
-  );
+/**
+ * True when this field may actually be requested from BambooHR. The answer comes from
+ * resolveAllowedFields itself — a second copy of the rule here would drift from the one that
+ * decides what is really sent, and the `allowed` flag would start lying.
+ */
+function isAllowedField(field: FieldMeta, options: FieldPolicyOptions): boolean {
+  const requested = field.alias ?? field.id;
+  return resolveAllowedFields([requested], [field], options).allowed.length > 0;
 }
 
 function matchesUser(user: BambooUser, needle: string): boolean {
@@ -33,7 +31,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       description:
         "List every employee field in this BambooHR account, standard and custom, with id, name, API alias, type and an `allowed` flag. Only fields with allowed:true can be read by bamboohr_get_employee or bamboohr_employee_report; the rest (pay, bank, national id, date of birth, gender, home contact details) are refused by policy. Use search to find a field by name (e.g. 'shoe', 'hire'). Set includeOptions to see the allowed values of list fields.",
       inputSchema: {
-        search: z.string().optional().describe("Case-insensitive substring of the field name or alias."),
+        search: z.string().trim().min(1).optional().describe("Case-insensitive substring of the field name or alias."),
         includeOptions: z.boolean().optional().describe("Attach the option list of list-type fields. Default false."),
       },
       annotations: READ_ONLY,
@@ -43,9 +41,10 @@ export function register(server: McpServer, ctx: ToolContext): void {
         ctx,
         { tool: "bamboohr_list_fields", filters: { search: search ? true : undefined, includeOptions } },
         async () => {
+          const options = { allowedCustomFields: ctx.settings.allowedCustomFields };
           let fields = await api.getFields();
           if (includeOptions) fields = mergeFieldOptions(fields, await api.getListFields());
-          return searchFields(fields, search).map((f) => ({ ...f, allowed: isAllowedField(f) }));
+          return searchFields(fields, search).map((f) => ({ ...f, allowed: isAllowedField(f, options) }));
         }
       )
   );
@@ -95,7 +94,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         "List BambooHR user accounts (people who can log in) with their linked employee id, email, status and last login. Useful for access reviews: who has an enabled account, who never logged in. Narrow the list with status or search; more accounts than the per-call record limit are refused.",
       inputSchema: {
         status: z.enum(["enabled", "disabled"]).optional().describe("Only accounts with this status. Default: all."),
-        search: z.string().min(1).optional().describe("Case-insensitive substring of the first name, last name or email."),
+        search: z.string().trim().min(1).optional().describe("Case-insensitive substring of the first name, last name or email."),
       },
       annotations: READ_ONLY,
     },

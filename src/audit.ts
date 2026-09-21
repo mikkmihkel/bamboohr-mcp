@@ -2,6 +2,7 @@ import { execFileSync } from "child_process";
 import { createHmac, randomBytes } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { toolPath } from "./credentialStore";
 
 /**
  * Local-only audit log (JSON lines). This module never performs any network I/O: it writes to
@@ -151,7 +152,11 @@ function ensureDir(logDir: string, platform: NodeJS.Platform, exec: AuditExecFn)
   if (!existed && platform === "win32") {
     // chmod does nothing on Windows: strip inherited ACEs and grant the current user full control.
     const user = process.env.USERNAME ?? process.env.USER ?? "%USERNAME%";
-    ignore(() => exec("icacls", [logDir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`]));
+    // Absolute path when it exists: an "icacls" earlier on PATH must not be the thing that gets
+    // to decide the permissions of the audit directory.
+    const root = process.env.SystemRoot?.trim() || "C:\\Windows";
+    const icacls = toolPath([`${root}\\System32\\icacls.exe`], "icacls");
+    ignore(() => exec(icacls, [logDir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`]));
   }
 }
 
@@ -165,7 +170,7 @@ function markExcludedFromSync(logDir: string, platform: NodeJS.Platform, exec: A
     const nosync = path.join(logDir, ".nosync");
     if (!fs.existsSync(nosync)) fs.writeFileSync(nosync, "", { mode: FILE_MODE });
   });
-  if (platform === "darwin") ignore(() => exec("tmutil", ["addexclusion", logDir]));
+  if (platform === "darwin") ignore(() => exec(toolPath(["/usr/bin/tmutil"], "tmutil"), ["addexclusion", logDir]));
 }
 
 function loadSalt(saltFile: string, platform: NodeJS.Platform): Buffer {

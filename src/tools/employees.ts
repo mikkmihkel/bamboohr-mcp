@@ -5,7 +5,20 @@ import { assertAllFieldsAllowed, enforceRecordLimit, isBlockedTable, PolicyError
 import type { ReportRow } from "../types";
 import { READ_ONLY, positiveInt, run, type ToolContext } from "./shared";
 
-const fieldName = z.string().min(1).describe("Field name, alias or numeric id from bamboohr_list_fields.");
+const fieldName = z.string().trim().min(1).describe("Field name, alias or numeric id from bamboohr_list_fields.");
+
+/** Organisational filters are compared after trimming, so " Sales " must not pass as a filter. */
+const orgName = z.string().trim().min(1);
+
+/** Table aliases are BambooHR identifiers; anything else is a typo or an injection attempt. */
+const tableAlias = z
+  .string()
+  .regex(/^[A-Za-z0-9_]{1,64}$/, "must be a table alias: letters, digits and underscores, at most 64 characters");
+
+/** ISO 8601 date or date-time. Keeps free text out of the value that reaches the API and the log. */
+const sinceTimestamp = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}(T[0-9:+\-Z.]+)?$/, "must be an ISO 8601 date (2026-09-01) or date-time");
 
 /** Exact, case-insensitive match on an organisational column, applied to the report rows. */
 function matchesColumn(row: ReportRow, column: string, wanted: string): boolean {
@@ -16,6 +29,8 @@ function matchesColumn(row: ReportRow, column: string, wanted: string): boolean 
 export function register(server: McpServer, ctx: ToolContext): void {
   const { api } = ctx;
   const maxRecords = () => ctx.settings.maxRecords;
+  // The custom-field allow-list is read per call: the settings object is the enrolled policy.
+  const fieldPolicy = () => ({ allowedCustomFields: ctx.settings.allowedCustomFields });
 
   server.registerTool(
     "bamboohr_get_employee",
@@ -36,7 +51,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         { tool: "bamboohr_get_employee", fields: wanted, employeeIds: [employeeId ?? 0], count: () => 1 },
         async () => {
           // Refused fields are never sent to BambooHR: the check happens before the call.
-          const allowed = assertAllFieldsAllowed(wanted, await ctx.fieldMeta());
+          const allowed = assertAllFieldsAllowed(wanted, await ctx.fieldMeta(), fieldPolicy());
           const { id, values } = await api.getEmployee(employeeId ?? 0, allowed);
           const { id: _drop, ...rest } = values;
           // excludedFields is always empty (an excluded field refuses the whole call); the key
@@ -56,9 +71,9 @@ export function register(server: McpServer, ctx: ToolContext): void {
       inputSchema: {
         fields: z.array(fieldName).min(1).max(MAX_REPORT_FIELDS - REPORT_ALWAYS_FIELDS.length).describe("Fields to include."),
         employeeIds: z.array(positiveInt).optional().describe("Restrict to these employee ids (at most the per-call record limit)."),
-        department: z.string().min(1).optional().describe("Only employees in this department (exact name, case-insensitive)."),
-        location: z.string().min(1).optional().describe("Only employees in this location (exact name, case-insensitive)."),
-        division: z.string().min(1).optional().describe("Only employees in this division (exact name, case-insensitive)."),
+        department: orgName.optional().describe("Only employees in this department (exact name, case-insensitive)."),
+        location: orgName.optional().describe("Only employees in this location (exact name, case-insensitive)."),
+        division: orgName.optional().describe("Only employees in this division (exact name, case-insensitive)."),
         includeInactive: z.boolean().optional().describe("Include employees whose status is not Active. Default false."),
       },
       annotations: READ_ONLY,
@@ -83,7 +98,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
             enforceRecordLimit(employeeIds.length, max, "Ask for fewer employeeIds, or use a department, location or division filter.");
           }
 
-          const allowed = assertAllFieldsAllowed(fields, await ctx.fieldMeta());
+          const allowed = assertAllFieldsAllowed(fields, await ctx.fieldMeta(), fieldPolicy());
           const always = REPORT_ALWAYS_FIELDS as readonly string[];
           // The columns the filters compare against must be in the report, because BambooHR
           // does not filter server-side — the rows are narrowed here instead.
@@ -134,7 +149,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       description:
         "Read the rows of an employee table for ONE employee: job history (jobInfo), employmentStatus, or any custom table (e.g. equipment, certificates). employeeId is required. Pay, compensation, bonus, commission, bank and similar tables are excluded by policy and are refused. Get valid table aliases from bamboohr_list_tables. Rows are unsorted; sort by date yourself.",
       inputSchema: {
-        table: z.string().min(1).describe("Table alias, e.g. jobInfo, employmentStatus, customEquipment."),
+        table: tableAlias.describe("Table alias, e.g. jobInfo, employmentStatus, customEquipment."),
         employeeId: positiveInt.describe("Internal employee id. Required: this tool reads one employee at a time."),
       },
       annotations: READ_ONLY,
@@ -169,7 +184,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
       description:
         "List employees whose record changed since a timestamp: new hires (Inserted), edits to any field or table (Updated), and removals (Deleted). Ids and timestamps only, no field values. Newest first. Use bamboohr_get_employee to see the current values.",
       inputSchema: {
-        since: z.string().min(10).describe("ISO 8601 date or date-time, e.g. 2026-09-01 or 2026-09-01T00:00:00+00:00."),
+        since: sinceTimestamp.describe("ISO 8601 date or date-time, e.g. 2026-09-01 or 2026-09-01T00:00:00+00:00."),
         type: z.enum(["inserted", "updated", "deleted"]).optional().describe("Only this change type. Default: all."),
       },
       annotations: READ_ONLY,
@@ -182,7 +197,16 @@ export function register(server: McpServer, ctx: ToolContext): void {
           filters: { since, type },
           count: (r: { employees: unknown[] }) => r.employees.length,
         },
-        () => api.getChangedEmployees(since.length === 10 ? `${since}T00:00:00+00:00` : since, type)
+        async () => {
+          const changed = await api.getChangedEmployees(since.length === 10 ? `${since}T00:00:00+00:00` : since, type);
+          // Without a cap, an old `since` returns the whole company as one list of ids.
+          enforceRecordLimit(
+            changed.employees.length,
+            maxRecords(),
+            "Use a more recent since or a change type."
+          );
+          return changed;
+        }
       )
   );
 }

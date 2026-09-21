@@ -69,6 +69,36 @@ describe("readSettings", () => {
     expect(JSON.stringify(settings)).not.toContain("key");
   });
 
+  it("reads the custom-field allow-list from the file and the environment", () => {
+    writeRaw({ companyDomain: "acme", allowedCustomFields: ["customShoeSize", " customEquipment ", ""] });
+    expect(readSettings(paths, {}).allowedCustomFields).toEqual(["customShoeSize", "customEquipment"]);
+    expect(readSettings(paths, { BAMBOOHR_ALLOWED_CUSTOM_FIELDS: "customA, customB" }).allowedCustomFields).toEqual([
+      "customA",
+      "customB",
+    ]);
+  });
+
+  it("keeps an explicitly empty custom-field list, which means 'no custom fields at all'", () => {
+    writeRaw({ companyDomain: "acme", allowedCustomFields: [] });
+    expect(readSettings(paths, {}).allowedCustomFields).toEqual([]);
+    expect(readSettings(paths, { BAMBOOHR_ALLOWED_CUSTOM_FIELDS: "" }).allowedCustomFields).toEqual([]);
+  });
+
+  it("leaves the custom-field rule automatic when nothing configures it", () => {
+    writeRaw({ companyDomain: "acme" });
+    expect(readSettings(paths, {}).allowedCustomFields).toBeUndefined();
+  });
+
+  it("ignores a revocation url that is not https, in the file and in the environment", () => {
+    // Otherwise anyone who can edit config.json or the environment downgrades the self-check.
+    writeRaw({ companyDomain: "acme", revocationUrl: "http://evil.test/r.json" });
+    expect(readSettings(paths, {}).revocationUrl).toBe(DEFAULT_REVOCATION_URL);
+    expect(readSettings(paths, { BAMBOOHR_REVOCATION_URL: "file:///tmp/r.json" }).revocationUrl).toBe(
+      DEFAULT_REVOCATION_URL
+    );
+    expect(readSettings(paths, { BAMBOOHR_REVOCATION_URL: "not a url" }).revocationUrl).toBe(DEFAULT_REVOCATION_URL);
+  });
+
   it("ignores invalid values instead of failing to start", () => {
     writeRaw({ companyDomain: "acme.bamboohr.com", maxRecords: 5000, enableSensitiveTools: "maybe" });
     const settings = readSettings(paths, {});
@@ -108,6 +138,14 @@ describe("writeSettings", () => {
 
   it("rejects a domain that is not a bare subdomain", () => {
     expect(() => writeSettings(paths, { companyDomain: "acme.bamboohr.com" })).toThrow(/subdomain/);
+  });
+
+  it("round-trips the custom-field allow-list and rejects a non-array one", () => {
+    writeSettings(paths, { companyDomain: "acme", allowedCustomFields: ["customShoeSize"] });
+    expect(readSettings(paths, {}).allowedCustomFields).toEqual(["customShoeSize"]);
+    writeSettings(paths, { allowedCustomFields: [] });
+    expect(readSettings(paths, {}).allowedCustomFields).toEqual([]);
+    expect(() => writeSettings(paths, { allowedCustomFields: "customShoeSize" as never })).toThrow(SettingsError);
   });
 
   it("rejects an out-of-range record cap and a non-https revocation url", () => {

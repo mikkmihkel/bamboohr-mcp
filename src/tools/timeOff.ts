@@ -1,12 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { addDays } from "../dates";
+import { createTtlCache, META_TTL_MS } from "../metaCache";
 import { buildVacationOverview } from "../overview";
-import { enforceRecordLimit, isSickType, reduceSickRequest, requireFilter } from "../policy";
+import { enforceRecordLimit, isSickType, PolicyError, reduceSickRequest, requireFilter } from "../policy";
 import type { DirectoryEmployee } from "../types";
 import { READ_ONLY, assertRange, isoDate, positiveInt, run, type ToolContext } from "./shared";
 
 const STATUS_VALUES = ["approved", "denied", "superceded", "requested", "canceled"] as const;
+
+/** Filters are compared after trimming, so "  " is not accepted as a filter at all. */
+const filterText = z.string().trim().min(1);
+
+/** A BambooHR time-off type id is a small integer; anything else is free text in disguise. */
+const timeOffTypeIdSchema = z.string().regex(/^\d{1,10}$/, "must be a numeric time-off type id");
 
 function matchesSearch(e: DirectoryEmployee, needle: string): boolean {
   const haystack = `${e.displayName ?? ""} ${e.firstName ?? ""} ${e.lastName ?? ""} ${e.workEmail ?? ""}`.toLowerCase();
@@ -20,6 +27,10 @@ function sameName(value: string | undefined, wanted: string): boolean {
 export function register(server: McpServer, ctx: ToolContext): void {
   const { api, today, envVacationType } = ctx;
   const maxRecords = () => ctx.settings.maxRecords;
+  // Time-off types change about as often as field metadata; one short-lived cache for both the
+  // list tool and the health-related-type check below.
+  const cache = createTtlCache(META_TTL_MS);
+  const timeOffTypes = () => cache.get("timeOffTypes", () => api.getTimeOffTypes());
 
   server.registerTool(
     "bamboohr_whos_out",
@@ -51,9 +62,9 @@ export function register(server: McpServer, ctx: ToolContext): void {
       description:
         "Look up employees in the BambooHR directory with id, name, job title, department, division, location, supervisor and work email. Requires search, department or location — listing the whole company in one call is not allowed — and returns at most the per-call record limit of people. Use the id with the balance and request tools.",
       inputSchema: {
-        search: z.string().min(1).optional().describe("Case-insensitive substring of the name or work email."),
-        department: z.string().min(1).optional().describe("Only employees in this department (exact name, case-insensitive)."),
-        location: z.string().min(1).optional().describe("Only employees in this location (exact name, case-insensitive)."),
+        search: filterText.optional().describe("Case-insensitive substring of the name or work email."),
+        department: filterText.optional().describe("Only employees in this department (exact name, case-insensitive)."),
+        location: filterText.optional().describe("Only employees in this location (exact name, case-insensitive)."),
       },
       annotations: READ_ONLY,
     },
@@ -63,11 +74,12 @@ export function register(server: McpServer, ctx: ToolContext): void {
         // Only the fact that a search word was used is logged, never the word itself.
         { tool: "bamboohr_list_employees", filters: { department, location, search: search ? true : undefined } },
         async () => {
+          // Tested on the trimmed values: a filter of spaces is no filter.
+          const needle = search?.trim().toLowerCase();
           requireFilter(
-            Boolean(search || department || location),
+            Boolean(needle || department?.trim() || location?.trim()),
             "bamboohr_list_employees requires search, department or location; listing the whole company is not allowed."
           );
-          const needle = search?.trim().toLowerCase();
           let people = await api.getDirectory();
           if (needle) people = people.filter((e) => matchesSearch(e, needle));
           if (department) people = people.filter((e) => sameName(e.department, department));
@@ -83,7 +95,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "List time-off types",
       description:
-        "List the company's time-off types (e.g. vacation, sick leave) with their ids and units, plus the default hours per weekday. Use this to find the right type name or id for other tools.",
+        "List the company's time-off types (e.g. vacation, unpaid leave) with their ids and units, plus the default hours per weekday. Use this to find the right type name or id for other tools. Health-related types (sick leave, care leave and similar) are excluded by policy and are not listed; health-related absences appear elsewhere as a generic 'absent'.",
       inputSchema: {},
       annotations: READ_ONLY,
     },
@@ -91,7 +103,12 @@ export function register(server: McpServer, ctx: ToolContext): void {
       run(
         ctx,
         { tool: "bamboohr_list_time_off_types", count: (r: { timeOffTypes: unknown[] }) => r.timeOffTypes.length },
-        () => api.getTimeOffTypes()
+        async () => {
+          // Listing the sick-leave type is itself a health disclosure — and it hands the model
+          // the very type id that the request tool refuses.
+          const { timeOffTypes: types, defaultHours } = await timeOffTypes();
+          return { timeOffTypes: types.filter((t) => !isSickType(t.name)), defaultHours };
+        }
       )
   );
 
@@ -126,7 +143,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         end: isoDate.describe("Range end, YYYY-MM-DD."),
         employeeId: positiveInt.optional().describe("Limit to one employee."),
         status: z.array(z.enum(STATUS_VALUES)).optional().describe("Limit to these statuses. Default: all."),
-        timeOffTypeId: z.string().optional().describe("Limit to one time-off type id (see bamboohr_list_time_off_types)."),
+        timeOffTypeId: timeOffTypeIdSchema.optional().describe("Limit to one time-off type id (see bamboohr_list_time_off_types)."),
       },
       annotations: READ_ONLY,
     },
@@ -140,6 +157,18 @@ export function register(server: McpServer, ctx: ToolContext): void {
         },
         async () => {
           assertRange(start, end);
+          // A health-related type id must not be usable as a filter: "show me every request of
+          // type 3" would otherwise be a list of who was ill, whatever the reduction does later.
+          if (timeOffTypeId !== undefined) {
+            const { timeOffTypes: types } = await timeOffTypes();
+            const match = types.find((t) => t.id === timeOffTypeId);
+            if (match && isSickType(match.name)) {
+              throw new PolicyError(
+                "tool_disabled",
+                `Time-off type ${timeOffTypeId} is health-related and excluded by policy; sick leave is only shown as a generic absence.`
+              );
+            }
+          }
           const requests = await api.getTimeOffRequests({
             start,
             end,
@@ -163,9 +192,9 @@ export function register(server: McpServer, ctx: ToolContext): void {
       inputSchema: {
         year: z.number().int().min(2000).max(2100).optional().describe("Calendar year. Default: current year."),
         asOf: isoDate.optional().describe("Balance date, YYYY-MM-DD, must be inside the year. Default: today (or Dec 31 for past years)."),
-        department: z.string().min(1).optional().describe("Only employees in this department (exact name, case-insensitive)."),
+        department: filterText.optional().describe("Only employees in this department (exact name, case-insensitive)."),
         employeeIds: z.array(positiveInt).optional().describe("Only these employees. Use instead of, or together with, department."),
-        timeOffType: z.string().optional().describe("Vacation time-off type name or id. Default: the enrolled vacation type, else a type named like 'vacation' or 'puhkus'."),
+        timeOffType: filterText.optional().describe("Vacation time-off type name or id. Default: the enrolled vacation type, else a type named like 'vacation' or 'puhkus'."),
         onlyMissingFourteenDayBlock: z.boolean().optional().describe("Return only employees without a 14-day continuous block."),
       },
       annotations: READ_ONLY,
@@ -186,7 +215,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
         },
         () => {
           requireFilter(
-            Boolean(input.department || input.employeeIds?.length),
+            Boolean(input.department?.trim() || input.employeeIds?.length),
             "bamboohr_vacation_overview requires a department or employeeIds; a company-wide overview is not allowed in one call. Ask per department."
           );
           return buildVacationOverview(api, input, {

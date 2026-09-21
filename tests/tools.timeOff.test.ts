@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TimeOffRequest } from "../src/types";
-import { connect, fakeApi, parseToolPayload, toolText, TODAY } from "./helpers";
+import { connect, envelopeBody, fakeApi, parseToolPayload, toolText, TODAY } from "./helpers";
 
 function request(overrides: Partial<TimeOffRequest> = {}): TimeOffRequest {
   return {
@@ -64,6 +64,16 @@ describe("bamboohr_list_employees", () => {
   });
 });
 
+describe("bamboohr_list_time_off_types", () => {
+  it("omits health-related types, so their ids are never handed to the model", async () => {
+    const { client } = await connect(fakeApi());
+    const res = await client.callTool({ name: "bamboohr_list_time_off_types", arguments: {} });
+    const body = parseToolPayload(res);
+    expect(body.timeOffTypes.map((t: any) => t.name)).toEqual(["Vacation"]);
+    expect(toolText(res)).not.toContain("Sick");
+  });
+});
+
 describe("bamboohr_time_off_balances", () => {
   it("drops health-related balances", async () => {
     const { client } = await connect(fakeApi());
@@ -94,10 +104,54 @@ describe("bamboohr_time_off_requests", () => {
     expect(body[0]).toMatchObject({ id: 1, typeName: "Vacation", typeId: "78" });
     expect(body[1]).toMatchObject({ id: 2, typeName: "absent", typeId: "" });
     expect(body[1].notes).toBeUndefined();
+    // How much sick leave, and in what unit, is health data of its own.
+    expect(body[1].amount).toBeUndefined();
+    expect(body[1].unit).toBeUndefined();
+    expect(body[0].amount).toBe(5);
     expect(toolText(res)).not.toMatch(/Sick leave|flu/);
     expect(audit.entries[0].filters).toEqual({
       start: "2026-01-01", end: "2026-12-31", status: ["approved"], timeOffTypeId: "78",
     });
+  });
+
+  it("refuses a health-related time-off type id before calling the API", async () => {
+    const api = fakeApi();
+    const { client, audit } = await connect(api);
+    const res = await client.callTool({
+      name: "bamboohr_time_off_requests",
+      arguments: { start: "2026-01-01", end: "2026-12-31", timeOffTypeId: "1" },
+    });
+    expect(res.isError).toBe(true);
+    expect(toolText(res)).toMatch(/health-related and excluded by policy/);
+    expect(api.getTimeOffRequests).not.toHaveBeenCalled();
+    expect(audit.entries[0]).toMatchObject({ outcome: "rejected", error: "PolicyError tool_disabled" });
+  });
+
+  it("lets an unknown type id through to BambooHR", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api);
+    const res = await client.callTool({
+      name: "bamboohr_time_off_requests",
+      arguments: { start: "2026-01-01", end: "2026-12-31", timeOffTypeId: "9999" },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(api.getTimeOffRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ typeIds: ["9999"] })
+    );
+  });
+
+  it("rejects a time-off type id that is not a number", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api);
+    const outcome = await client
+      .callTool({
+        name: "bamboohr_time_off_requests",
+        arguments: { start: "2026-01-01", end: "2026-12-31", timeOffTypeId: "1 OR notes" },
+      })
+      .then((r) => ({ kind: "result" as const, r }), (e) => ({ kind: "thrown" as const, e }));
+    if (outcome.kind === "result") expect(outcome.r.isError).toBe(true);
+    else expect(String(outcome.e.message)).toMatch(/Invalid arguments|numeric time-off type id/);
+    expect(api.getTimeOffRequests).not.toHaveBeenCalled();
   });
 
   it("rejects a range that ends before it starts, without calling the API", async () => {
@@ -178,7 +232,8 @@ describe("bamboohr_vacation_overview", () => {
       arguments: { department: "Engineering", timeOffType: "Sabbatical" },
     });
     expect(res.isError).toBe(true);
-    const body = JSON.parse(toolText(res));
+    // The message quotes BambooHR's own type names: it is fenced like any other payload.
+    const body = JSON.parse(envelopeBody(toolText(res)));
     expect(body.error).toMatch(/No time-off type matches "Sabbatical"/);
     expect(body.availableTypes.map((t: any) => t.id)).toEqual(["78", "1"]);
     expect(audit.entries[0]).toMatchObject({ outcome: "error", error: "VacationTypeNotFoundError" });

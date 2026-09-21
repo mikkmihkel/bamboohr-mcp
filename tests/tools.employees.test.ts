@@ -65,6 +65,58 @@ describe("bamboohr_get_employee", () => {
   });
 });
 
+describe("custom-field allow-list", () => {
+  it("refuses a custom field that is not on the configured allow-list", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api, { settings: { allowedCustomFields: ["customOther"] } });
+    const res = await client.callTool({
+      name: "bamboohr_get_employee",
+      arguments: { employeeId: 7, fields: ["customShoeSize"] },
+    });
+    expect(res.isError).toBe(true);
+    expect(toolText(res)).toContain("custom-field allow-list");
+    expect(api.getEmployee).not.toHaveBeenCalled();
+  });
+
+  it("allows a listed custom field and still allows standard fields", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api, { settings: { allowedCustomFields: ["CustomShoeSize"] } });
+    const res = await client.callTool({
+      name: "bamboohr_get_employee",
+      arguments: { employeeId: 7, fields: ["customShoeSize", "firstName"] },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(api.getEmployee).toHaveBeenCalledWith(7, ["customShoeSize", "firstName"]);
+  });
+
+  it("refuses every custom field when the allow-list is empty", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api, { settings: { allowedCustomFields: [] } });
+    const res = await client.callTool({
+      name: "bamboohr_employee_report",
+      arguments: { fields: ["customShoeSize"], department: "Engineering" },
+    });
+    expect(res.isError).toBe(true);
+    expect(api.runCustomReport).not.toHaveBeenCalled();
+  });
+
+  it("refuses a custom field whose BambooHR type is sensitive, however it is named", async () => {
+    const api = fakeApi({
+      getFields: vi.fn(async () => [
+        { id: "5000", name: "Extra info", alias: "customExtraInfo", type: "currency" },
+      ]),
+    });
+    const { client } = await connect(api);
+    const res = await client.callTool({
+      name: "bamboohr_get_employee",
+      arguments: { employeeId: 7, fields: ["customExtraInfo"] },
+    });
+    expect(res.isError).toBe(true);
+    expect(toolText(res)).toContain("sensitive field type currency");
+    expect(api.getEmployee).not.toHaveBeenCalled();
+  });
+});
+
 describe("bamboohr_employee_report", () => {
   it("requires employeeIds or an organisational filter", async () => {
     const api = fakeApi();
@@ -206,5 +258,96 @@ describe("bamboohr_changed_employees", () => {
     await client.callTool({ name: "bamboohr_changed_employees", arguments: { since: "2026-09-01", type: "updated" } });
     expect(api.getChangedEmployees).toHaveBeenCalledWith("2026-09-01T00:00:00+00:00", "updated");
     expect(audit.entries[0]).toMatchObject({ outcome: "ok", filters: { since: "2026-09-01", type: "updated" } });
+  });
+
+  it("refuses more changed employees than the per-call limit", async () => {
+    // An old `since` otherwise returns the whole company as one list of ids.
+    const api = fakeApi({
+      getChangedEmployees: vi.fn(async () => ({
+        latest: "2026-09-14",
+        employees: Array.from({ length: 3 }, (_, i) => ({
+          id: i,
+          action: "Updated" as const,
+          lastChanged: "2026-09-01T00:00:00+00:00",
+        })),
+      })),
+    });
+    const { client, audit } = await connect(api, { settings: { maxRecords: 2 } });
+    const res = await client.callTool({ name: "bamboohr_changed_employees", arguments: { since: "2020-01-01" } });
+    expect(res.isError).toBe(true);
+    expect(toolText(res)).toMatch(/above the per-call limit of 2\. Use a more recent since or a change type\./);
+    expect(audit.entries[0].error).toBe("PolicyError record_limit");
+  });
+
+  it.each(["last tuesday", "2026-09-01; DROP", "01/09/2026", "2026-9-1"])(
+    "rejects %s as a since value without calling the API",
+    async (since) => {
+      const api = fakeApi();
+      const { client } = await connect(api);
+      const outcome = await client
+        .callTool({ name: "bamboohr_changed_employees", arguments: { since } })
+        .then((r) => ({ kind: "result" as const, r }), (e) => ({ kind: "thrown" as const, e }));
+      if (outcome.kind === "result") expect(outcome.r.isError).toBe(true);
+      else expect(String(outcome.e.message)).toMatch(/Invalid arguments|ISO 8601/);
+      expect(api.getChangedEmployees).not.toHaveBeenCalled();
+    }
+  );
+
+  it("accepts a full ISO date-time", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api);
+    await client.callTool({
+      name: "bamboohr_changed_employees",
+      arguments: { since: "2026-09-01T00:00:00+00:00" },
+    });
+    expect(api.getChangedEmployees).toHaveBeenCalledWith("2026-09-01T00:00:00+00:00", undefined);
+  });
+});
+
+describe("filter and audit hygiene", () => {
+  it("rejects a whitespace-only organisational filter", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api);
+    const outcome = await client
+      .callTool({ name: "bamboohr_employee_report", arguments: { fields: ["customShoeSize"], department: "   " } })
+      .then((r) => ({ kind: "result" as const, r }), (e) => ({ kind: "thrown" as const, e }));
+    if (outcome.kind === "result") expect(outcome.r.isError).toBe(true);
+    else expect(String(outcome.e.message)).toMatch(/Invalid arguments|too small/);
+    expect(api.runCustomReport).not.toHaveBeenCalled();
+  });
+
+  it("trims a padded filter before comparing rows", async () => {
+    const api = fakeApi();
+    const { client, audit } = await connect(api);
+    const res = await client.callTool({
+      name: "bamboohr_employee_report",
+      arguments: { fields: ["customShoeSize"], department: "  Engineering  " },
+    });
+    expect(parseToolPayload(res).employees).toHaveLength(1);
+    expect(audit.entries[0].filters).toEqual({ department: "Engineering" });
+  });
+
+  it("rejects a table alias that is not a BambooHR identifier", async () => {
+    const api = fakeApi();
+    const { client } = await connect(api);
+    const outcome = await client
+      .callTool({ name: "bamboohr_table_rows", arguments: { table: "jobInfo; rm -rf /", employeeId: 7 } })
+      .then((r) => ({ kind: "result" as const, r }), (e) => ({ kind: "thrown" as const, e }));
+    if (outcome.kind === "result") expect(outcome.r.isError).toBe(true);
+    else expect(String(outcome.e.message)).toMatch(/Invalid arguments|table alias/);
+    expect(api.getTableRows).not.toHaveBeenCalled();
+  });
+
+  it("truncates long filter values and field names in the audit log", async () => {
+    const api = fakeApi();
+    const { client, audit } = await connect(api);
+    const longAlias = `custom${"X".repeat(200)}`;
+    await client.callTool({
+      name: "bamboohr_employee_report",
+      arguments: { fields: [longAlias], department: "E".repeat(200) },
+    });
+    const entry = audit.entries[0];
+    expect((entry.filters!.department as string).length).toBeLessThanOrEqual(65);
+    expect(entry.fields![0].length).toBeLessThanOrEqual(65);
   });
 });
