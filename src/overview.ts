@@ -4,12 +4,15 @@ import {
 } from "./analysis";
 import type { BambooHRApi } from "./bamboohr";
 import { isISODate, todayISO, yearOf, type ISODate } from "./dates";
+import { enforceRecordLimit } from "./policy";
 import type { TimeOffBalance, TimeOffType } from "./types";
 
 export interface OverviewInput {
   year?: number;
   asOf?: ISODate;
   department?: string;
+  /** Restrict to these employees, applied after the department filter. */
+  employeeIds?: number[];
   timeOffType?: string;
   onlyMissingFourteenDayBlock?: boolean;
 }
@@ -86,7 +89,7 @@ async function mapWithConcurrency<T, R>(
 export async function buildVacationOverview(
   api: BambooHRApi,
   input: OverviewInput,
-  opts: { envVacationType?: string; concurrency?: number; today?: ISODate } = {}
+  opts: { envVacationType?: string; concurrency?: number; today?: ISODate; maxEmployees?: number } = {}
 ): Promise<VacationOverview> {
   const { year, asOf } = resolveOverviewDefaults(input, opts.today);
   const concurrency = opts.concurrency ?? 5;
@@ -102,9 +105,17 @@ export async function buildVacationOverview(
 
   const directory = await api.getDirectory();
   const wanted = input.department?.trim().toLowerCase();
-  const employees = wanted
+  let employees = wanted
     ? directory.filter((e) => e.department?.trim().toLowerCase() === wanted)
     : directory;
+  if (input.employeeIds?.length) {
+    const ids = new Set(input.employeeIds);
+    employees = employees.filter((e) => ids.has(e.id));
+  }
+  // Checked before any balance call: an oversized group costs one request per employee.
+  if (opts.maxEmployees !== undefined) {
+    enforceRecordLimit(employees.length, opts.maxEmployees, "Choose a smaller department or pass employeeIds.");
+  }
 
   const allRequests = await api.getTimeOffRequests({
     start: `${year}-01-01`,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BambooHRApi } from "../src/bamboohr";
 import { buildVacationOverview, resolveOverviewDefaults, VacationTypeNotFoundError } from "../src/overview";
+import { PolicyError } from "../src/policy";
 import type { TimeOffBalance, TimeOffRequest } from "../src/types";
 
 const TODAY = "2026-09-14";
@@ -143,6 +144,29 @@ describe("buildVacationOverview", () => {
     expect(row.usedYearToDate).toBeUndefined();
     expect(row.unplanned).toBeUndefined();
     expect(out.summary.errors).toBe(1);
+  });
+
+  it("narrows to employeeIds after the department filter", async () => {
+    const api = fakeApi();
+    const out = await buildVacationOverview(api, { employeeIds: [1, 2] }, { today: TODAY });
+    expect(out.employees.map((e) => e.employeeId)).toEqual([1, 2]);
+    expect(api.getBalances).toHaveBeenCalledTimes(2);
+
+    const both = await buildVacationOverview(fakeApi(), { department: "Engineering", employeeIds: [1, 2] }, { today: TODAY });
+    expect(both.employees.map((e) => e.employeeId)).toEqual([1]);
+  });
+
+  it("refuses a group larger than maxEmployees before any balance call", async () => {
+    const api = fakeApi();
+    const err = await buildVacationOverview(api, {}, { today: TODAY, maxEmployees: 2 }).catch((e) => e);
+    expect(err).toBeInstanceOf(PolicyError);
+    expect(err.code).toBe("record_limit");
+    expect(err.message).toMatch(/Result has 3 records, above the per-call limit of 2\. Choose a smaller department or pass employeeIds\./);
+    expect(api.getBalances).not.toHaveBeenCalled();
+    expect(api.getTimeOffRequests).not.toHaveBeenCalled();
+
+    const ok = await buildVacationOverview(fakeApi(), { department: "Engineering" }, { today: TODAY, maxEmployees: 2 });
+    expect(ok.employees).toHaveLength(2);
   });
 
   it("limits concurrent balance calls", async () => {

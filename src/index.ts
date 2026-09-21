@@ -1,29 +1,106 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createBambooHRApi } from "./bamboohr";
+import { resolveAppPaths } from "./appPaths";
+import { createAuditLog, type AuditLog } from "./audit";
+import { createBambooHRApi, type BambooHRApi } from "./bamboohr";
 import { createClient } from "./client";
-import { ConfigError, loadConfig } from "./config";
+import { isSubcommand, runCli } from "./cli";
+import { ConfigError, enrolmentCommand, loadConfig, NotEnrolledError } from "./config";
+import { CredentialStoreError } from "./credentialStore";
+import { runSelfCheck } from "./selfCheck";
 import { createServer } from "./server";
+import { DEFAULT_REVOCATION_URL, readSettings } from "./settings";
+import { VERSION } from "./version";
 
-async function main() {
-  let config;
-  try {
-    config = loadConfig();
-  } catch (e) {
-    if (e instanceof ConfigError) {
-      console.error(`bamboohr-mcp: ${e.message}`);
-      process.exit(1);
-    }
-    throw e;
-  }
+const EXIT_CONFIG = 1;
+const EXIT_SELF_CHECK = 3;
 
-  const api = createBambooHRApi(createClient(config));
-  const server = createServer(api, { envVacationType: config.vacationType });
-  await server.connect(new StdioServerTransport());
-  console.error(`bamboohr-mcp: connected to ${config.companyDomain}.bamboohr.com over stdio`);
+/**
+ * Stand-in API used when no key is enrolled: the MCP server still starts and
+ * still advertises its tools, so Claude Desktop shows them and every call
+ * answers with the enrolment instructions instead of the server being absent.
+ */
+export function notEnrolledApi(error: Error): BambooHRApi {
+  return new Proxy({} as BambooHRApi, {
+    get: () => () => Promise.reject(error),
+  });
 }
 
-main().catch((error) => {
-  console.error("bamboohr-mcp: fatal error", error);
-  process.exit(1);
-});
+async function main() {
+  const argv = process.argv.slice(2);
+  if (isSubcommand(argv[0])) {
+    process.exitCode = await runCli(argv);
+    return;
+  }
+
+  const paths = resolveAppPaths();
+  const settings = readSettings(paths);
+
+  // Revocation check before anything else connects: a build that is known bad
+  // must not start. The request carries no credentials (see selfCheck.ts).
+  let selfCheck;
+  try {
+    selfCheck = await runSelfCheck(settings.revocationUrl ?? DEFAULT_REVOCATION_URL, VERSION);
+  } catch (e) {
+    selfCheck = { status: "unavailable" as const, reason: (e as Error).message };
+  }
+  if (selfCheck.status === "revoked") {
+    console.error(`bamboohr-mcp: refusing to start — ${selfCheck.reason}`);
+    process.exit(EXIT_SELF_CHECK);
+  }
+  if (selfCheck.status === "unavailable") {
+    if (settings.strictSelfCheck) {
+      console.error(`bamboohr-mcp: refusing to start — ${selfCheck.reason} (strict self-check is on)`);
+      process.exit(EXIT_SELF_CHECK);
+    }
+    console.error(`bamboohr-mcp: self-check skipped — ${selfCheck.reason}`);
+  }
+
+  let api: BambooHRApi;
+  let banner: string;
+  try {
+    const config = await loadConfig({ paths });
+    api = createBambooHRApi(createClient(config));
+    banner = `connected to ${config.companyDomain}.bamboohr.com over stdio`;
+  } catch (e) {
+    if (e instanceof NotEnrolledError) {
+      api = notEnrolledApi(e);
+      banner = `started without credentials — ${e.message}`;
+    } else if (e instanceof CredentialStoreError) {
+      // A locked keyring or a missing helper must not take the server down
+      // either: start, list the tools, and answer every call with the reason.
+      const reason = new Error(`${e.message}. ${e.hint} Then run: ${enrolmentCommand()}`);
+      reason.name = "CredentialStoreError"; // the audit log records the class name only
+      api = notEnrolledApi(reason);
+      banner = `started without credentials — ${reason.message}`;
+    } else if (e instanceof ConfigError) {
+      console.error(`bamboohr-mcp: ${e.message}`);
+      process.exit(EXIT_CONFIG);
+    } else {
+      throw e;
+    }
+  }
+
+  // The audit log is best effort: a log that cannot be opened must never keep
+  // the server from starting, so fall back to a sink that drops every entry.
+  let audit: AuditLog;
+  try {
+    audit = createAuditLog({ logDir: paths.logDir, saltFile: paths.saltFile });
+  } catch (e) {
+    console.error(`bamboohr-mcp: audit log unavailable — ${(e as Error).message}`);
+    audit = { dir: paths.logDir, file: "", write: () => {}, hashEmployeeId: () => "" };
+  }
+
+  const server = createServer(api, { envVacationType: settings.vacationType, settings, audit });
+  await server.connect(new StdioServerTransport());
+  console.error(`bamboohr-mcp: ${banner}`);
+}
+
+// Only when started as a program: importing this module (tests, tooling) must not
+// connect a transport or read the credential store.
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("bamboohr-mcp: fatal error", error);
+    process.exit(1);
+  });
+}
