@@ -3,72 +3,129 @@
   "manifest_version": "0.2",
   "name": "bamboohr-mcp",
   "display_name": "BambooHR",
-  "version": "3.0.0",
-  "description": "Ask Claude about your BambooHR data: employees, custom fields, tables, time off, training and holidays. Read-only.",
-  "long_description": "Connects Claude Desktop to BambooHR with your own API key. You see exactly what you can see in BambooHR. The connector never creates, approves or changes anything.",
+  "version": "4.0.0",
+  "description": "Ask Claude about your BambooHR data: who is out, vacation balances, employee fields and tables, training and holidays. Read-only, with a field allow-list, compensation and identity fields blocked, per-call record caps and a local audit log.",
+  "long_description": "Connects Claude Desktop to BambooHR with your own API key. You see at most what you can see in BambooHR; the connector never creates, approves or changes anything.\n\n**Use cases**\n\n- Absence planning: who is out this week, which requests are waiting for approval, which public holidays are left.\n- Vacation follow-up: unplanned vacation days per employee in a department and who has not taken a continuous 14-day block.\n- Employee lookups: hire date, job title, supervisor, work contact details and company-specific custom fields such as shoe size or equipment.\n- Small targeted reports: a few work-related fields for a named department, location or list of employees.\n- Training compliance: required training types and one employee's completed trainings.\n- Access reviews: BambooHR login accounts and recent record changes.\n\n**Hardened by design**\n\n- The API key is captured once by the `enroll` command and kept in the operating system credential store (Keychain, DPAPI, Secret Service). Nothing sensitive is passed through the Claude Desktop config.\n- Employee fields are checked against an allow-list in code. Pay, bank, tax, national id, date of birth, home contact and similar fields are refused and scrubbed from every response.\n- Compensation, bonus, commission and bank tables are blocked. Dependents and employee files are disabled unless an administrator enables them.\n- Sick leave is reduced to a generic absence. Bulk retrieval is capped per call and needs an explicit employee or filter.\n- Every call is written to a local, owner-only audit log without values or names. Free text from BambooHR is marked as untrusted data.\n\nRead-only usage limits are enforced by this connector, but an API key that has write access in BambooHR always carries risk. Use a key with the narrowest access level you can. The repository owner accepts no responsibility for any use of this software.",
   "author": {
     "name": "Mikk Mihkel Vaabel"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mikkmihkel/bamboohr-mcp"
+  },
+  "homepage": "https://github.com/mikkmihkel/bamboohr-mcp#readme",
+  "documentation": "https://github.com/mikkmihkel/bamboohr-mcp/blob/main/README.md",
+  "support": "https://github.com/mikkmihkel/bamboohr-mcp/issues",
+  "icon": "icon.png",
   "license": "MIT",
-  "keywords": ["bamboohr", "hr", "time off", "vacation", "employees", "custom fields"],
+  "keywords": [
+    "bamboohr",
+    "hr",
+    "time off",
+    "vacation",
+    "absence",
+    "employees",
+    "custom fields",
+    "training",
+    "read-only",
+    "audit log",
+    "privacy"
+  ],
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/index.js"],
-      "env": {
-        "BAMBOOHR_TOKEN": "${user_config.bamboohr_token}",
-        "BAMBOOHR_COMPANY_DOMAIN": "${user_config.company_domain}",
-        "BAMBOOHR_VACATION_TYPE": "${user_config.vacation_type}"
-      }
-    }
-  },
-  "user_config": {
-    "bamboohr_token": {
-      "type": "string",
-      "title": "BambooHR API key",
-      "description": "Your personal API key. Create it in BambooHR: profile photo (bottom left) > API Keys > Add New Key.",
-      "sensitive": true,
-      "required": true
-    },
-    "company_domain": {
-      "type": "string",
-      "title": "Company subdomain",
-      "description": "Only the first part of the address. If BambooHR opens at acme.bamboohr.com, enter: acme",
-      "required": true
-    },
-    "vacation_type": {
-      "type": "string",
-      "title": "Vacation time-off type (optional)",
-      "description": "Fill in only if the tool says it cannot identify the vacation type. Use the exact name shown in BambooHR.",
-      "required": false,
-      "default": ""
+      "args": [
+        "${__dirname}/dist/index.js"
+      ]
     }
   },
   "tools": [
-    { "name": "bamboohr_whos_out", "description": "Who is out of office and company holidays in a range" },
-    { "name": "bamboohr_list_employees", "description": "Current employees from the company directory" },
-    { "name": "bamboohr_list_time_off_types", "description": "The company's time-off types and their ids" },
-    { "name": "bamboohr_time_off_balances", "description": "One employee's time-off balances as of a date" },
-    { "name": "bamboohr_time_off_requests", "description": "Time-off requests in a range, with filters" },
-    { "name": "bamboohr_vacation_overview", "description": "Unplanned vacation per employee and the 14-day check" },
-    { "name": "bamboohr_list_fields", "description": "Every employee field, standard and custom, with aliases" },
-    { "name": "bamboohr_list_tables", "description": "Employee tables and their columns, including custom tables" },
-    { "name": "bamboohr_get_employee", "description": "One employee's standard and custom field values" },
-    { "name": "bamboohr_employee_report", "description": "Chosen fields for every employee in one call" },
-    { "name": "bamboohr_table_rows", "description": "Rows of an employee table for one or all" },
-    { "name": "bamboohr_changed_employees", "description": "Employee records added, changed or removed since a time" },
-    { "name": "bamboohr_training_types", "description": "Training types and categories, including required ones" },
-    { "name": "bamboohr_training_records", "description": "One employee's completed trainings with dates and hours" },
-    { "name": "bamboohr_employee_dependents", "description": "Dependents recorded for one or all employees" },
-    { "name": "bamboohr_employee_files", "description": "Documents on an employee's record, metadata only" },
-    { "name": "bamboohr_list_users", "description": "BambooHR login accounts with status and last login" },
-    { "name": "bamboohr_company_holidays", "description": "Company holidays overlapping a date range" }
+    {
+      "name": "bamboohr_whos_out",
+      "description": "Who is out of office and company holidays in a range (absence only, no leave type)"
+    },
+    {
+      "name": "bamboohr_list_employees",
+      "description": "Look up current employees by name, department or location"
+    },
+    {
+      "name": "bamboohr_list_time_off_types",
+      "description": "The company's time-off types and their ids"
+    },
+    {
+      "name": "bamboohr_time_off_balances",
+      "description": "One employee's time-off balances as of a date"
+    },
+    {
+      "name": "bamboohr_time_off_requests",
+      "description": "Time-off requests in a range, with filters; sick leave shown as generic absence"
+    },
+    {
+      "name": "bamboohr_vacation_overview",
+      "description": "Unplanned vacation per employee for a department and the 14-day check"
+    },
+    {
+      "name": "bamboohr_list_fields",
+      "description": "Employee fields, standard and custom, with aliases"
+    },
+    {
+      "name": "bamboohr_list_tables",
+      "description": "Employee tables and their columns, excluding compensation tables"
+    },
+    {
+      "name": "bamboohr_get_employee",
+      "description": "One employee's allow-listed field values"
+    },
+    {
+      "name": "bamboohr_employee_report",
+      "description": "Allow-listed fields for a filtered set of employees, capped per call"
+    },
+    {
+      "name": "bamboohr_table_rows",
+      "description": "Rows of one employee table for one employee"
+    },
+    {
+      "name": "bamboohr_changed_employees",
+      "description": "Employee ids added, changed or removed since a time"
+    },
+    {
+      "name": "bamboohr_training_types",
+      "description": "Training types and categories, including required ones"
+    },
+    {
+      "name": "bamboohr_training_records",
+      "description": "One employee's completed trainings with dates and hours"
+    },
+    {
+      "name": "bamboohr_employee_dependents",
+      "description": "Dependents for one employee (disabled unless enabled by an administrator)"
+    },
+    {
+      "name": "bamboohr_employee_files",
+      "description": "Documents on an employee's record, metadata only (disabled unless enabled by an administrator)"
+    },
+    {
+      "name": "bamboohr_list_users",
+      "description": "BambooHR login accounts with status and last login"
+    },
+    {
+      "name": "bamboohr_company_holidays",
+      "description": "Company holidays overlapping a date range"
+    }
   ],
   "compatibility": {
     "claude_desktop": ">=0.10.0",
-    "platforms": ["darwin", "win32"],
-    "runtimes": { "node": ">=20.0.0" }
-  }
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "privacy_policies": [
+    "https://github.com/mikkmihkel/bamboohr-mcp/blob/main/README.md#privacy-and-data-flow"
+  ]
 }

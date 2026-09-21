@@ -1,0 +1,182 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { AppPaths } from "./appPaths";
+
+/**
+ * Non-secret configuration. The BambooHR API key is deliberately NOT part of
+ * this interface: it is never read from the environment and never written to a
+ * file in clear text, only stored in the OS credential store.
+ */
+export interface Settings {
+  /** BambooHR subdomain: "acme" for acme.bamboohr.com. */
+  companyDomain?: string;
+  /** Name or id of the time-off type that counts as vacation. */
+  vacationType?: string;
+  /** Gates the tools that expose dependents and employee files. */
+  enableSensitiveTools: boolean;
+  /** Per-call record cap, 1..500. */
+  maxRecords: number;
+  /** Where the start-up self-check looks for revoked versions. */
+  revocationUrl?: string;
+  /** true: refuse to start when the self-check endpoint is unreachable. */
+  strictSelfCheck: boolean;
+}
+
+export const DEFAULT_REVOCATION_URL =
+  "https://raw.githubusercontent.com/mikkmihkel/bamboohr-mcp/main/revocations.json";
+
+export const DEFAULT_MAX_RECORDS = 25;
+export const MIN_MAX_RECORDS = 1;
+export const MAX_MAX_RECORDS = 500;
+
+/** Existing rule: the bare subdomain only, never a host name or a URL. */
+export const SUBDOMAIN_RE = /^[a-z0-9-]+$/i;
+
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+
+export class SettingsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SettingsError";
+  }
+}
+
+function defaults(): Settings {
+  return { enableSensitiveTools: false, maxRecords: DEFAULT_MAX_RECORDS, strictSelfCheck: false };
+}
+
+function asString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  const s = asString(value)?.toLowerCase();
+  if (s === undefined) return undefined;
+  if (s === "1" || s === "true" || s === "yes" || s === "on") return true;
+  if (s === "0" || s === "false" || s === "no" || s === "off") return false;
+  return undefined;
+}
+
+function asRecordCap(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : Number(asString(value));
+  if (!Number.isInteger(n) || n < MIN_MAX_RECORDS || n > MAX_MAX_RECORDS) return undefined;
+  return n;
+}
+
+function readFileSettings(configFile: string): Record<string, unknown> {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configFile, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new SettingsError(`Cannot read ${configFile}: ${(e as Error).message}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new SettingsError(
+      `${configFile} is not valid JSON. Fix or delete the file and run the enroll subcommand again.`
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new SettingsError(`${configFile} must contain a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** Apply one layer (file values or env values) over the accumulated settings. Invalid values are ignored. */
+function apply(into: Settings, layer: {
+  companyDomain?: unknown;
+  vacationType?: unknown;
+  enableSensitiveTools?: unknown;
+  maxRecords?: unknown;
+  revocationUrl?: unknown;
+  strictSelfCheck?: unknown;
+}): void {
+  const companyDomain = asString(layer.companyDomain);
+  if (companyDomain !== undefined && SUBDOMAIN_RE.test(companyDomain)) into.companyDomain = companyDomain;
+  const vacationType = asString(layer.vacationType);
+  if (vacationType !== undefined) into.vacationType = vacationType;
+  const enableSensitiveTools = asBoolean(layer.enableSensitiveTools);
+  if (enableSensitiveTools !== undefined) into.enableSensitiveTools = enableSensitiveTools;
+  const maxRecords = asRecordCap(layer.maxRecords);
+  if (maxRecords !== undefined) into.maxRecords = maxRecords;
+  const revocationUrl = asString(layer.revocationUrl);
+  if (revocationUrl !== undefined) into.revocationUrl = revocationUrl;
+  const strictSelfCheck = asBoolean(layer.strictSelfCheck);
+  if (strictSelfCheck !== undefined) into.strictSelfCheck = strictSelfCheck;
+}
+
+/**
+ * Settings from config.json, then non-secret environment overrides on top.
+ * BAMBOOHR_TOKEN is not consulted anywhere: an API key in the environment would
+ * end up in process listings, crash dumps and Claude Desktop's config file.
+ */
+export function readSettings(paths: AppPaths, env: NodeJS.ProcessEnv = process.env): Settings {
+  const settings = defaults();
+  apply(settings, readFileSettings(paths.configFile));
+  apply(settings, {
+    companyDomain: env.BAMBOOHR_COMPANY_DOMAIN,
+    vacationType: env.BAMBOOHR_VACATION_TYPE,
+    enableSensitiveTools: env.BAMBOOHR_ENABLE_SENSITIVE_TOOLS,
+    maxRecords: env.BAMBOOHR_MAX_RECORDS,
+    revocationUrl: env.BAMBOOHR_REVOCATION_URL,
+    strictSelfCheck: env.BAMBOOHR_STRICT_SELF_CHECK,
+  });
+  if (settings.revocationUrl === undefined) settings.revocationUrl = DEFAULT_REVOCATION_URL;
+  return settings;
+}
+
+/**
+ * Merge `patch` into config.json and write it back with 0600 inside a 0700
+ * directory, so another account on the machine cannot read which company this
+ * install talks to. Merges against the file, never against environment
+ * overrides, so an override cannot be baked into the file by accident.
+ */
+export function writeSettings(paths: AppPaths, patch: Partial<Settings>): void {
+  if (patch.companyDomain !== undefined) {
+    const domain = asString(patch.companyDomain);
+    if (!domain || !SUBDOMAIN_RE.test(domain)) {
+      throw new SettingsError(
+        `companyDomain must be the bare subdomain (e.g. "acme" for acme.bamboohr.com), got "${patch.companyDomain}"`
+      );
+    }
+  }
+  if (patch.maxRecords !== undefined && asRecordCap(patch.maxRecords) === undefined) {
+    throw new SettingsError(`maxRecords must be an integer between ${MIN_MAX_RECORDS} and ${MAX_MAX_RECORDS}`);
+  }
+  if (patch.revocationUrl !== undefined) {
+    const url = asString(patch.revocationUrl);
+    if (!url || !isHttpsUrl(url)) throw new SettingsError(`revocationUrl must be an https URL, got "${patch.revocationUrl}"`);
+  }
+
+  const current = readFileSettings(paths.configFile);
+  const merged: Record<string, unknown> = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    merged[key] = typeof value === "string" ? value.trim() : value;
+  }
+
+  fs.mkdirSync(path.dirname(paths.configFile), { recursive: true, mode: DIR_MODE });
+  fs.writeFileSync(paths.configFile, `${JSON.stringify(merged, null, 2)}\n`, { mode: FILE_MODE });
+  // writeFileSync only applies `mode` when it creates the file; chmod covers rewrites.
+  try {
+    fs.chmodSync(paths.configFile, FILE_MODE);
+    fs.chmodSync(path.dirname(paths.configFile), DIR_MODE);
+  } catch {
+    // chmod is a no-op on Windows; never fail a write over it.
+  }
+}
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
