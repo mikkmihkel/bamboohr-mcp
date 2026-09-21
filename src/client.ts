@@ -24,7 +24,7 @@ export class BambooHRApiError extends Error {
     let msg = status === 0
       ? `BambooHR request to ${endpoint} failed: ${detail ?? "network error"}`
       : `BambooHR returned ${status} for ${endpoint}${detail ? `: ${detail}` : ""}`;
-    if (status === 401) msg += ". Check that BAMBOOHR_TOKEN is a valid API key.";
+    if (status === 401) msg += ". Check that the enrolled API key is valid (run `enroll` again).";
     if (status === 403) msg += ". The API key's BambooHR access level does not allow this data.";
     return msg;
   }

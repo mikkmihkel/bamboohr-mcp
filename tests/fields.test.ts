@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compact, mergeFieldOptions, missingFields, searchFields, DEFAULT_EMPLOYEE_FIELDS, REPORT_ALWAYS_FIELDS } from "../src/fields";
+import { ALLOWED_STANDARD_FIELDS } from "../src/policy";
 import type { FieldMeta, ListFieldMeta } from "../src/types";
 
 const fields: FieldMeta[] = [
@@ -53,5 +54,17 @@ describe("constants", () => {
     expect(DEFAULT_EMPLOYEE_FIELDS).toContain("hireDate");
     expect(DEFAULT_EMPLOYEE_FIELDS).toContain("status");
     expect(REPORT_ALWAYS_FIELDS).toEqual(["id", "displayName", "status"]);
+  });
+
+  it("every default field is on the policy allow-list", () => {
+    const notAllowed = DEFAULT_EMPLOYEE_FIELDS.filter((f) => !ALLOWED_STANDARD_FIELDS.has(f));
+    expect(notAllowed).toEqual([]);
+  });
+
+  it("does not ask for date of birth, gender or home-address fields by default", () => {
+    for (const field of ["dateOfBirth", "gender", "address1", "city", "country", "homePhone", "payRate"]) {
+      expect(DEFAULT_EMPLOYEE_FIELDS, field).not.toContain(field);
+    }
+    expect(REPORT_ALWAYS_FIELDS.every((f) => ALLOWED_STANDARD_FIELDS.has(f))).toBe(true);
   });
 });

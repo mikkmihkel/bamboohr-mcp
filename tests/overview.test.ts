@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BambooHRApi } from "../src/bamboohr";
 import { buildVacationOverview, resolveOverviewDefaults, VacationTypeNotFoundError } from "../src/overview";
+import { PolicyError } from "../src/policy";
 import type { TimeOffBalance, TimeOffRequest } from "../src/types";
 
 const TODAY = "2026-09-14";
@@ -32,12 +33,16 @@ function fakeApi(overrides: Partial<BambooHRApi> = {}): BambooHRApi {
       if (employeeId === 3) throw new Error("BambooHR returned 403 for /employees/3/time_off/calculator");
       return balance(employeeId, employeeId === 1 ? 18 : 5);
     }),
-    getTimeOffRequests: vi.fn(async () => [
-      req(10, 1, "2026-07-06", "2026-07-19", 10),
-      req(11, 1, "2026-10-05", "2026-10-09", 5, "requested"),
-      req(12, 2, "2026-08-03", "2026-08-07", 5),
-      req(13, 2, "2026-11-02", "2026-11-06", 5, "denied"),
-    ]),
+    // The real API filters server-side when employeeId is given; the fake must too, otherwise a
+    // per-employee fetch would look like it returned everyone's requests.
+    getTimeOffRequests: vi.fn(async (q: { employeeId?: number }) =>
+      [
+        req(10, 1, "2026-07-06", "2026-07-19", 10),
+        req(11, 1, "2026-10-05", "2026-10-09", 5, "requested"),
+        req(12, 2, "2026-08-03", "2026-08-07", 5),
+        req(13, 2, "2026-11-02", "2026-11-06", 5, "denied"),
+      ].filter((r) => q.employeeId === undefined || r.employeeId === q.employeeId)
+    ),
     ...overrides,
   };
 }
@@ -98,8 +103,33 @@ describe("buildVacationOverview", () => {
   });
 
   it("uses the env vacation type when no argument is given", async () => {
-    const out = await buildVacationOverview(fakeApi(), {}, { today: TODAY, envVacationType: "Sick" });
-    expect(out.vacationType.id).toBe("1");
+    const api = fakeApi({
+      getTimeOffTypes: vi.fn(async () => ({
+        timeOffTypes: [
+          { id: "2", name: "Unpaid leave", units: "days" as const },
+          { id: "78", name: "Vacation", units: "days" as const },
+        ],
+        defaultHours: [],
+      })),
+    });
+    const out = await buildVacationOverview(api, {}, { today: TODAY, envVacationType: "Unpaid leave" });
+    expect(out.vacationType.id).toBe("2");
+  });
+
+  it("refuses a health-related type as the vacation type, before reading the directory", async () => {
+    // This report names every employee, their balance and every absence block: for sick leave
+    // that is a health record, whoever asked for it.
+    for (const requested of [{ timeOffType: "Sick" }, {}]) {
+      const api = fakeApi();
+      const err = await buildVacationOverview(api, requested, {
+        today: TODAY,
+        envVacationType: requested.timeOffType ? undefined : "Sick",
+      }).catch((e) => e);
+      expect(err).toBeInstanceOf(PolicyError);
+      expect(err.code).toBe("tool_disabled");
+      expect(err.message).toMatch(/health-related/);
+      expect(api.getDirectory).not.toHaveBeenCalled();
+    }
   });
 
   it("throws VacationTypeNotFoundError listing available types", async () => {
@@ -143,6 +173,50 @@ describe("buildVacationOverview", () => {
     expect(row.usedYearToDate).toBeUndefined();
     expect(row.unplanned).toBeUndefined();
     expect(out.summary.errors).toBe(1);
+  });
+
+  it("narrows to employeeIds after the department filter", async () => {
+    const api = fakeApi();
+    const out = await buildVacationOverview(api, { employeeIds: [1, 2] }, { today: TODAY });
+    expect(out.employees.map((e) => e.employeeId)).toEqual([1, 2]);
+    expect(api.getBalances).toHaveBeenCalledTimes(2);
+    expect(out.employees[0].plannedAfterAsOf).toBe(5);
+
+    const both = await buildVacationOverview(fakeApi(), { department: "Engineering", employeeIds: [1, 2] }, { today: TODAY });
+    expect(both.employees.map((e) => e.employeeId)).toEqual([1]);
+  });
+
+  it("refuses a group larger than maxEmployees before any balance call", async () => {
+    const api = fakeApi();
+    const err = await buildVacationOverview(api, {}, { today: TODAY, maxEmployees: 2 }).catch((e) => e);
+    expect(err).toBeInstanceOf(PolicyError);
+    expect(err.code).toBe("record_limit");
+    expect(err.message).toMatch(/Result has 3 records, above the per-call limit of 2\. Choose a smaller department or pass employeeIds\./);
+    expect(api.getBalances).not.toHaveBeenCalled();
+    expect(api.getTimeOffRequests).not.toHaveBeenCalled();
+
+    const ok = await buildVacationOverview(fakeApi(), { department: "Engineering" }, { today: TODAY, maxEmployees: 2 });
+    expect(ok.employees).toHaveLength(2);
+  });
+
+  it("asks for the requests of each named employee instead of the whole company", async () => {
+    // A company-wide request list would hand back the vacation of everyone else too.
+    const api = fakeApi();
+    await buildVacationOverview(api, { employeeIds: [1, 2] }, { today: TODAY });
+    expect(api.getTimeOffRequests).toHaveBeenCalledTimes(2);
+    for (const [q] of (api.getTimeOffRequests as any).mock.calls) {
+      expect([1, 2]).toContain(q.employeeId);
+      expect(q).toMatchObject({ start: "2026-01-01", end: "2026-12-31", typeIds: ["78"] });
+    }
+  });
+
+  it("keeps one company-wide request call in department mode", async () => {
+    // BambooHR has no server-side department filter for requests, so this stays a single call.
+    const api = fakeApi();
+    const out = await buildVacationOverview(api, { department: "Engineering" }, { today: TODAY });
+    expect(api.getTimeOffRequests).toHaveBeenCalledTimes(1);
+    expect((api.getTimeOffRequests as any).mock.calls[0][0].employeeId).toBeUndefined();
+    expect(out.employees.find((e) => e.employeeId === 1)!.plannedAfterAsOf).toBe(5);
   });
 
   it("limits concurrent balance calls", async () => {

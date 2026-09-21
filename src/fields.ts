@@ -1,9 +1,14 @@
 import type { FieldMeta, FieldValues, ListFieldMeta } from "./types";
 
+/**
+ * Default fields for bamboohr_get_employee. Every entry must be in
+ * policy.ALLOWED_STANDARD_FIELDS: date of birth, gender and home-address fields
+ * are deliberately absent, so the default call cannot leak them.
+ */
 export const DEFAULT_EMPLOYEE_FIELDS: readonly string[] = [
   "displayName", "firstName", "lastName", "preferredName", "jobTitle", "department", "division", "location",
   "supervisor", "supervisorEId", "hireDate", "originalHireDate", "terminationDate", "status", "employmentHistoryStatus",
-  "workEmail", "workPhone", "mobilePhone", "employeeNumber", "dateOfBirth", "gender", "country", "city",
+  "workEmail", "workPhone", "mobilePhone", "employeeNumber",
 ];
 
 export const MAX_REPORT_FIELDS = 400;

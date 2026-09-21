@@ -1,0 +1,7 @@
+{
+  "$comment": "Version revocation list read by the bamboohr-mcp start-up self-check (task 10). Organisations should host their own copy on an internal HTTPS endpoint and point BAMBOOHR_REVOCATION_URL / `enroll --revocation-url` at it. A version listed in revokedVersions, or lower than minimumVersion, refuses to start.",
+  "schemaVersion": 1,
+  "minimumVersion": "4.0.0",
+  "revokedVersions": ["3.0.0"],
+  "message": "Versions before 4.0.0 read the API key from the Claude Desktop config and do not enforce the field allow-list. Install the latest release."
+}

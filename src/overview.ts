@@ -4,12 +4,15 @@ import {
 } from "./analysis";
 import type { BambooHRApi } from "./bamboohr";
 import { isISODate, todayISO, yearOf, type ISODate } from "./dates";
+import { enforceRecordLimit, isSickType, PolicyError } from "./policy";
 import type { TimeOffBalance, TimeOffType } from "./types";
 
 export interface OverviewInput {
   year?: number;
   asOf?: ISODate;
   department?: string;
+  /** Restrict to these employees, applied after the department filter. */
+  employeeIds?: number[];
   timeOffType?: string;
   onlyMissingFourteenDayBlock?: boolean;
 }
@@ -86,7 +89,7 @@ async function mapWithConcurrency<T, R>(
 export async function buildVacationOverview(
   api: BambooHRApi,
   input: OverviewInput,
-  opts: { envVacationType?: string; concurrency?: number; today?: ISODate } = {}
+  opts: { envVacationType?: string; concurrency?: number; today?: ISODate; maxEmployees?: number } = {}
 ): Promise<VacationOverview> {
   const { year, asOf } = resolveOverviewDefaults(input, opts.today);
   const concurrency = opts.concurrency ?? 5;
@@ -99,19 +102,46 @@ export async function buildVacationOverview(
     if (candidates.length > 1) throw new VacationTypeNotFoundError(undefined, candidates, "ambiguous");
     throw new VacationTypeNotFoundError(requested, timeOffTypes);
   }
+  // A health-related type can never be "the vacation type": this report names every employee,
+  // their balance and every absence block, which for sick leave is a health record.
+  if (isSickType(vacationType.name)) {
+    throw new PolicyError(
+      "tool_disabled",
+      `Time-off type "${vacationType.name}" is health-related and excluded by policy; choose a vacation type instead.`
+    );
+  }
 
   const directory = await api.getDirectory();
   const wanted = input.department?.trim().toLowerCase();
-  const employees = wanted
+  let employees = wanted
     ? directory.filter((e) => e.department?.trim().toLowerCase() === wanted)
     : directory;
+  if (input.employeeIds?.length) {
+    const ids = new Set(input.employeeIds);
+    employees = employees.filter((e) => ids.has(e.id));
+  }
+  // Checked before any balance call: an oversized group costs one request per employee.
+  if (opts.maxEmployees !== undefined) {
+    enforceRecordLimit(employees.length, opts.maxEmployees, "Choose a smaller department or pass employeeIds.");
+  }
 
-  const allRequests = await api.getTimeOffRequests({
+  const range = {
     start: `${year}-01-01`,
     end: `${year}-12-31`,
-    status: ["approved", "requested"],
+    status: ["approved", "requested"] as const,
     typeIds: [vacationType.id],
-  });
+  };
+  // With an explicit employee list, ask per employee: the company-wide call would return the
+  // vacation of everyone else too, which this call has no business seeing. Department mode keeps
+  // the single call because BambooHR has no server-side department filter for requests, and the
+  // rows are narrowed here instead.
+  const allRequests = input.employeeIds?.length
+    ? (
+        await mapWithConcurrency(employees, concurrency, (employee) =>
+          api.getTimeOffRequests({ ...range, status: [...range.status], employeeId: employee.id })
+        )
+      ).flat()
+    : await api.getTimeOffRequests({ ...range, status: [...range.status] });
   const vacationRequests = selectVacationRequests(allRequests, vacationType.id);
   const byEmployee = new Map<number, typeof vacationRequests>();
   for (const r of vacationRequests) {

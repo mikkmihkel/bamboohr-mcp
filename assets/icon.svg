@@ -1,0 +1,37 @@
+<svg width="512" height="512" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="BambooHR MCP connector icon">
+  <title>BambooHR MCP</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBFDFB"/>
+      <stop offset="1" stop-color="#EDF3ED"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8CCF4D"/>
+      <stop offset="1" stop-color="#6DB63A"/>
+    </linearGradient>
+    <linearGradient id="leafDark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6DB63A"/>
+      <stop offset="1" stop-color="#4E9C2B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Tile -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)"/>
+  <rect x="8.5" y="8.5" width="111" height="111" rx="27.5" stroke="#D5E0D5" stroke-width="1"/>
+
+  <g transform="translate(6.5 -5)">
+  <!-- Connector: two endpoints joined by a smooth path (the MCP link) -->
+  <path d="M32 86 C32 73 41 64 54 64 H64 C77 64 86 55 86 42" stroke="#27312B" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="32" cy="86" r="8.5" fill="#27312B"/>
+  <circle cx="32" cy="86" r="3.2" fill="#F7F9F7"/>
+  <circle cx="86" cy="42" r="8.5" fill="#6DB63A"/>
+  <circle cx="86" cy="42" r="3.2" fill="#F7F9F7"/>
+
+  <!-- Bamboo: segmented stalk growing from the link, two leaves -->
+  <path d="M74 67 V103" stroke="#4E9C2B" stroke-width="5" stroke-linecap="round"/>
+  <path d="M70.5 85 H77.5" stroke="#F7F9F7" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M74 78 C74 68.5 81.5 61 91 61 C91 70.5 83.5 78 74 78 Z" fill="url(#leaf)"/>
+  <path d="M73.5 91 C83 91 90.5 98.5 90.5 108 C81 108 73.5 100.5 73.5 91 Z" fill="url(#leafDark)"/>
+
+  </g>
+</svg>
