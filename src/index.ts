@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { resolveAppPaths } from "./appPaths";
 import { createAuditLog, type AuditLog } from "./audit";
 import { createBambooHRApi, type BambooHRApi } from "./bamboohr";
+import { notEnrolledApi } from "./notEnrolledApi";
 import { createClient } from "./client";
 import { isSubcommand, runCli } from "./cli";
 import { ConfigError, enrolmentCommand, loadConfig, NotEnrolledError } from "./config";
@@ -14,17 +15,6 @@ import { VERSION } from "./version";
 
 const EXIT_CONFIG = 1;
 const EXIT_SELF_CHECK = 3;
-
-/**
- * Stand-in API used when no key is enrolled: the MCP server still starts and
- * still advertises its tools, so Claude Desktop shows them and every call
- * answers with the enrolment instructions instead of the server being absent.
- */
-export function notEnrolledApi(error: Error): BambooHRApi {
-  return new Proxy({} as BambooHRApi, {
-    get: () => () => Promise.reject(error),
-  });
-}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -96,11 +86,12 @@ async function main() {
   console.error(`bamboohr-mcp: ${banner}`);
 }
 
-// Only when started as a program: importing this module (tests, tooling) must not
-// connect a transport or read the credential store.
-if (require.main === module) {
-  main().catch((error) => {
-    console.error("bamboohr-mcp: fatal error", error);
-    process.exit(1);
-  });
-}
+// Always start when this file is loaded. Claude Desktop's built-in Node runtime
+// loads the entry point in a way where `require.main === module` is false, and a
+// guard on it left the process idle until the client's initialize timed out
+// (4.0.0 regression). Nothing else imports this module: shared code lives in
+// notEnrolledApi.ts and the other modules.
+main().catch((error) => {
+  console.error("bamboohr-mcp: fatal error", error);
+  process.exit(1);
+});
