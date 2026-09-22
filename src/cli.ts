@@ -319,6 +319,10 @@ async function doctor(argv: string[], deps: CliDeps): Promise<number> {
 const USAGE = [
   "bamboohr-mcp — read-only MCP server for BambooHR",
   "",
+  "Under Claude Desktop the key and subdomain come from the extension's install",
+  "dialog (Settings > Extensions > BambooHR > Configure). These commands are for",
+  "everything else, and for inspecting an install.",
+  "",
   "Usage:",
   "  bamboohr-mcp                    start the stdio MCP server (no subcommand)",
   "  bamboohr-mcp enroll [options]   store the API key in the OS credential store",

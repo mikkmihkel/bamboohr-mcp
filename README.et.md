@@ -22,21 +22,18 @@ BambooHR-i andmeid ei muudeta kunagi. Midagi ei looda, ei kinnitata, ei parandat
 
 ## Kiirpaigaldus (Claude Desktop)
 
-Node.js-i paigaldada ei ole vaja. Claude Desktopil on oma käituskeskkond kaasas.
+Node.js-i paigaldada ei ole vaja ja terminali avama ei pea. Claude Desktopil on oma käituskeskkond kaasas ja paigaldusaken küsib kaks asja, mida ühendus vajab.
 
-1. Laadi viimasest väljalaskest alla fail [`bamboohr-mcp.mcpb`](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest/download/bamboohr-mcp.mcpb). Soovi korral [kontrolli allalaaditud faili](#väljalaske-kontrollimine).
-2. Tee failil topeltklõps. Claude Desktop avab paigaldusakna. Vajuta **Install**. Aken ei küsi midagi muud: ei võtit ega aadressi.
-3. Alusta uut vestlust ja küsi: *„Kes on sel nädalal puhkusel?"*. Esimene vastus on veateade, milles on sinu arvuti jaoks täpne registreerimiskäsk, umbes selline:
+1. Loo BambooHR-is API-võti: klõpsa oma profiilipildil (all vasakul) > **API Keys** > **Add New Key**. Kopeeri võti kohe, seda näidatakse ainult korra.
+2. Laadi viimasest väljalaskest alla fail [`bamboohr-mcp.mcpb`](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest/download/bamboohr-mcp.mcpb). Soovi korral [kontrolli allalaaditud faili](#väljalaske-kontrollimine).
+3. Tee failil topeltklõps. Claude Desktop avab paigaldusakna, mis küsib **ettevõtte alamdomeeni** (`firma`, kui aadress on `firma.bamboohr.com`) ja **BambooHR-i API-võtit**. Täida mõlemad ja vajuta **Install**.
+4. Alusta uut vestlust ja küsi: *„Kes on sel nädalal puhkusel?"*.
 
-   ```
-   No BambooHR API key is enrolled on this machine. Run:
-   "/Applications/Claude.app/.../node" "/Users/sina/Library/Application Support/Claude/Claude Extensions/.../dist/index.js" enroll
-   ```
+Võtmeväli on paketi manifestis märgitud tundlikuks (`sensitive`), nii et Claude Desktop hoiab seda operatsioonisüsteemi paroolihoidlas, mitte seadistusfailis, ja annab selle edasi ainult sellele serveriprotsessile. Esimesel käivitamisel kopeerib ühendus võtme samasse hoidlasse oma nime alla (teenus `bamboohr-mcp`, konto `api-key`), nii et käsud `status`, `doctor` ja `logs` ning kasutamine väljaspool Claude Desktopi töötavad ilma teistkordse seadistamiseta.
 
-4. Ava terminal (macOS: Terminal, Windows: PowerShell), kleebi käsk ja vajuta Enter. Käsk küsib ettevõtte aadressi esimest osa (`firma`, kui aadress on `firma.bamboohr.com`) ja seejärel API-võtit. Võtit sisestamisel ei kuvata ja see salvestatakse operatsioonisüsteemi paroolihoidlasse. BambooHR-is leiad võtme oma profiilipildi alt (all vasakul) > **API Keys** > **Add New Key**.
-5. Küsi sama küsimus uuesti.
+Võtme, alamdomeeni või puhkuse liigi hilisemaks muutmiseks: **Settings > Extensions > BambooHR > Configure**. Uued väärtused hakkavad kehtima, kui Claude Desktop ühenduse uuesti käivitab.
 
-Kui topeltklõps ei tee midagi, vali **Settings > Extensions > Advanced settings > Install Extension** ja näita fail ette. Teami või Enterprise'i paketi puhul võib olla vaja, et administraator kohandatud laiendused eelnevalt lubab. Uuendamiseks paigalda uus fail; registreering jääb alles.
+Kui topeltklõps ei tee midagi, vali **Settings > Extensions > Advanced settings > Install Extension** ja näita fail ette. Teami või Enterprise'i paketi puhul võib olla vaja, et administraator kohandatud laiendused eelnevalt lubab. Uuendamiseks paigalda uus fail; seaded jäävad alles.
 
 Paigaldusjuhend personalitöötajale: [docs/PAIGALDUSJUHEND.md](docs/PAIGALDUSJUHEND.md).
 
@@ -50,7 +47,7 @@ Kõik allpool loetletu on koodis jõustatud ja testidega kaetud. See on põhjus,
 
 | # | Meede | Kus |
 |---|---|---|
-| 1 | **Saladusi seadistuses ei ole.** Claude Desktopi seadistus käivitab programmi ilma `env`-plokita. API-võti võetakse ühe korra vastu käsuga `enroll` ja hoitakse operatsioonisüsteemi paroolihoidlas: macOS-i Keychain (`security`), Windowsi DPAPI (kasutaja ulatus, fail kaustas `%LOCALAPPDATA%`), Linuxi Secret Service (`secret-tool`). Võti loetakse sealt igal käivitamisel ning seda ei võeta kunagi vastu keskkonnamuutujast, seadistusfailist ega tööriista argumendist. Registreerimisel antakse võti OS-i abiprogrammile standardsisendi kaudu (`security -i`, PowerShell, `secret-tool`), mitte kunagi käsureal, ja abiprogramme kutsutakse absoluutse teega ilma kestata. Kui võtit ei ole, tagastab iga tööriist veateate koos registreerimiskäsuga. | `src/credentialStore.ts`, `src/config.ts`, `src/cli.ts` |
+| 1 | **Võti ei jõua ühtegi seadistusfaili.** Paigaldusaken küsib selle tundliku (`sensitive`) user_config-väljana, nii et Claude Desktop hoiab võtit operatsioonisüsteemi paroolihoidlas ja annab selle edasi ainult selle serveriprotsessi keskkonnas, muutujas `BAMBOOHR_API_KEY`. Käivitamisel kopeerib ühendus võtme samasse hoidlasse oma nime alla — macOS-i Keychain (`security`), Windowsi DPAPI (kasutaja ulatus, fail kaustas `%LOCALAPPDATA%`), Linuxi Secret Service (`secret-tool`) — ja loeb selle sealt siis, kui paigaldusaken mängus ei ole; nii töötab `enroll` väljaspool Claude Desktopi. Ühtegi muud keskkonnamuutujat, seadistusfaili ega tööriista argumenti võtme jaoks ei vaadata. Võti antakse OS-i abiprogrammile standardsisendi kaudu (`security -i`, PowerShell, `secret-tool`), mitte kunagi käsureal, ja abiprogramme kutsutakse absoluutse teega ilma kestata. Kui võtit ei ole, tagastab iga tööriist veateate, mis ütleb, kust see seadistada. | `src/credentialStore.ts`, `src/config.ts`, `src/cli.ts`, `manifest.json` |
 | 2 | **Väljade lubatud loend, mitte keelatud loend.** `bamboohr_get_employee` ja `bamboohr_employee_report` võtavad vastu ainult koodis kirjeldatud loendis olevaid välju (nimi, ametikoht, osakond, üksus, asukoht, juht, tööle asumise ja lahkumise kuupäevad, staatus, töökontaktid, töötaja number). Kohandatud väljad, kuhu ettevõttespetsiifilised palga- või pangaväljad tavaliselt satuvad, peavad läbima kolm kontrolli: BambooHR-i väljatüüp ei ole raha-, isikukoodi-, panga- ega kaitstud tunnuse tüüp; ei alias ega kuvatav nimi ei vasta keelatud mustrile (inglise ja eesti sõnavara, ankurdamata, nii et „Net pay", „Töötasu" või „Pangakonto" jäävad kinni); ja kui administraator on käsuga `enroll --allow-custom-field` määranud selgesõnalise loendi, on alias selles loendis. `--no-custom-fields` keelab kõik kohandatud väljad. Kõigest muust keeldutakse enne HTTP-päringut teatega „excluded by policy". | `src/policy.ts` |
 | 3 | **Töötasu on tööriista piiril blokeeritud.** `bamboohr_table_rows` keeldub tabelitest `compensation`, `bonus`, `commission`, pangaandmete, otsemaksete, palgaarvestuse ja kõigist kohandatud tabelitest, mille alias neile mustritele vastab. `bamboohr_list_tables` neid ei näita. Väljad `payRate`, `payRateEffectiveDate`, `payType`, `payPer`, `payGroup`, `paidPer`, `ssn`, `nationalId`, pangaväljad ja teised on igal pool välistatud. | `src/policy.ts`, `src/tools/employees.ts` |
 | 4 | **Vastuse järelpuhastus.** Enne iga vastuse tagastamist käiakse kogu vastuseobjekt läbi ja eemaldatakse võtmed, mis vastavad keelatud mustritele (töötasu, palk, boonus, komisjonitasu, pank, IBAN, SWIFT, kontonumber, maksud, isikukood, sotsiaalkindlustusnumber, pass, sünnikuupäev, sugu, perekonnaseis, etniline kuuluvus, rahvus, kodakondsus, usk, puue, meditsiin, kodukontaktid, aadress, hädaabikontakt). Puhastus töötab igas tööriistas, ka vastustel, mida lubatud loend juba filtreeris, nii et BambooHR-i hiljem lisatavad väljad ei leki vaikimisi. | `src/policy.ts`, `src/tools/shared.ts` |
@@ -69,7 +66,7 @@ Standardväljad: `id`, `displayName`, `firstName`, `lastName`, `preferredName`, 
 
 ### Käsud
 
-Käivita need sama `node`-i ja `index.js`-i teega, mille registreerimisveateade välja trükib, või lähtekoodist käsuga `node dist/index.js`.
+Vajalikud ainult väljaspool Claude Desktopi või siis, kui tahad näha, mida paigaldus teeb. Käivita need lähtekoodist käsuga `node dist/index.js` või paigaldatud paketi puhul täpselt selle käsuga, mille veateade välja trükib (Claude Desktopi all sisaldab see `ELECTRON_RUN_AS_NODE=1`, sest käituskeskkond on seal Claude'i enda Electroni abiprogramm, mitte `node`; ilma selleta avab abiprogramm akna ja skripti ei käivita).
 
 | Käsk | Mida teeb |
 |---|---|
@@ -82,7 +79,7 @@ Käivita need sama `node`-i ja `index.js`-i teega, mille registreerimisveateade 
 
 ### Seaded
 
-Mittesalajased seaded asuvad rakendusandmete kaustas failis `config.json` ja neid kirjutab `enroll`. Keskkonnamuutujad kirjutavad need arendajate jaoks üle; ükski neist ei saa kanda API-võtit.
+Mittesalajased seaded asuvad rakendusandmete kaustas failis `config.json`; neid kirjutab `enroll` või esimene käivitus pärast paigaldusakent. Keskkonnamuutujad kirjutavad need üle; paigaldusaken annab nii edasi `BAMBOOHR_COMPANY_DOMAIN` ja `BAMBOOHR_VACATION_TYPE`. `BAMBOOHR_API_KEY` on ainus muutuja, mis kannab võtit, ja see ei ole seade: seda ei kirjutata kunagi `config.json`-i ega logisse ega tagastata ühegi käsuga.
 
 | Seade | Keskkonnamuutuja | Vaikimisi | Tähendus |
 |---|---|---|---|
@@ -163,7 +160,7 @@ Proovi järele: küsi Claude'ilt *„Näita töötajate välju, mille nimes on '
 
 ## Paketi jagamine personalile
 
-Saada personalitöötajatele link [viimasele väljalaskele](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest) koos paigaldusjuhendiga. Iga kasutaja registreerib oma võtme; midagi ei jagata.
+Saada personalitöötajatele link [viimasele väljalaskele](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest) koos paigaldusjuhendiga. Iga kasutaja loob ja sisestab paigaldusaknas oma võtme; midagi ei jagata ja terminali ei ole vaja.
 
 - Paigaldusjuhend personalile: [docs/PAIGALDUSJUHEND.md](docs/PAIGALDUSJUHEND.md)
 - Skriptitud paigaldus: `echo "$KEY" | node dist/index.js enroll --subdomain firma --key-stdin` loeb võtme standardsisendist, nii et see ei satu käsureale ega käsuajalukku.
@@ -254,7 +251,7 @@ Sulgudes on tööriist, mida Claude vastamiseks kasutab.
 
 - Andmed liiguvad BambooHR-ist sinu arvutis töötavasse ühendusse ja sealt sinu Claude'i vestlusesse. Ühendus BambooHR-i andmeid ei salvesta: ei ole andmebaasi ega kettal vahemälu. Väljade ja tabelite metaandmeid hoitakse mälus kümme minutit. Auditilogi sisaldab päringute metaandmeid, kunagi mitte väärtusi ega nimesid.
 - Vestlusesse jõudnud andmetele kehtivad sinu organisatsiooni Claude'i paketi tingimused ja andmekaitsereeglid. Töötajate andmed on isikuandmed. Küsi ainult seda, mida vajad, ja eelista koondküsimusi tervete kaartide väljavõtmisele.
-- API-võti ei lahku sinu arvutist mujale kui päringutes aadressile `https://<firma>.bamboohr.com`. Võti loetakse operatsioonisüsteemi paroolihoidlast, kunagi mitte failist ega argumendist, seega ei saa Claude'i veenda kasutama kellegi teise võtit.
+- API-võti ei lahku sinu arvutist mujale kui päringutes aadressile `https://<firma>.bamboohr.com`. Võti tuleb laienduse paigaldusaknast või operatsioonisüsteemi paroolihoidlast, kunagi mitte failist, tööriista argumendist ega vestlusest, seega ei saa Claude'i veenda kasutama kellegi teise võtit.
 - Ainus muu võrgupäring on käivitamisel tühistusloendi laadimine, mis saadab ainult versiooninumbri.
 - Kui võti lekib või inimene lahkub, tühista võti BambooHR-is jaotises **API Keys** ja käivita arvutis `unenroll`.
 
@@ -262,15 +259,16 @@ Sulgudes on tööriist, mida Claude vastamiseks kasutab.
 
 | Sümptom | Tõenäoline põhjus ja lahendus |
 |---|---|
-| „No BambooHR API key is enrolled on this machine" | Käivita teates näidatud `enroll`-käsk. |
-| `401` või „Check that the enrolled API key is valid" | Võti on vale või tühistatud. Loo uus ja käivita `enroll` uuesti. |
+| „No BambooHR API key is available on this machine" | Ava **Settings > Extensions > BambooHR > Configure** ja täida API-võti ja alamdomeen. Väljaspool Claude Desktopi käivita teates näidatud `enroll`-käsk. |
+| „is not a bare BambooHR subdomain" | Alamdomeeni väljal on terve aadress. Kirjuta `firma`, mitte `firma.bamboohr.com` ega `https://firma.bamboohr.com`. |
+| `401` või „Check that the enrolled API key is valid" | Võti on vale või tühistatud. Loo uus ja sisesta see **Configure**-aknas või käivita `enroll` uuesti. |
 | `403` või „access level does not allow this data" | Sinu BambooHR-i õigused ei hõlma neid andmeid. Pöördu BambooHR-i administraatori poole. |
 | „excluded by policy" | Väli või tabel on lubatud loendist väljas. See on taotluslik, vt [Mida lubatud loend sisaldab](#mida-lubatud-loend-sisaldab). |
 | „above the per-call limit" | Kitsenda päringut osakonna, asukoha, otsisõna, lühema ajavahemiku või id-loendiga või tõsta registreerimisel `maxRecords`. |
 | „requires employeeIds or a filter" | Lisa osakond, asukoht, üksus, otsisõna või id-loend. |
 | Väli, mis kindlasti olemas on, ilmub `missingFields`-is | Võti ei näe seda või nimi on vale. Käivita `bamboohr_list_fields` otsisõnaga ja kasuta tagastatud aliast. |
 | „This version has been revoked" | Paigalda viimane väljalase. |
-| Puhkuseülevaade ei suuda puhkuse liiki tuvastada | Käivita `enroll --vacation-type "<täpne nimi>"`. |
+| Puhkuseülevaade ei suuda puhkuse liiki tuvastada | Kirjuta liigi täpne nimi **Configure**-akna puhkuseliigi väljale või käivita `enroll --vacation-type "<täpne nimi>"`. |
 | `secret-tool` puudub (Linux) | Paigalda `libsecret-tools` ja veendu, et Secret Service (GNOME Keyring, KWallet) töötab. |
 
 ## Arendus

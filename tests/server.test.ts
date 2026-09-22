@@ -212,7 +212,8 @@ describe("MCP server", () => {
         "bamboohr_table_rows:rejected",
       ]);
 
-      const serialised = JSON.stringify(audit.entries);
+      // Without the timestamps: a millisecond field can contain any digit string by chance.
+      const serialised = JSON.stringify(audit.entries.map(({ ts, ...rest }) => rest));
       for (const value of ["Anna", "Tamm", "42", "Laptop", "anna@acme.test"]) {
         expect(serialised, `audit log leaks ${value}`).not.toContain(value);
       }
