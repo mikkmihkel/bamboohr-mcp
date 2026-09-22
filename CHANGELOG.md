@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.0.1 (2026-09-22)
+
+### Fixed
+
+- The server did not answer Claude Desktop's `initialize` request: the bootstrap only ran when `require.main === module`, which is false under Claude Desktop's built-in Node runtime, so the process stayed idle until the client timed out. `main()` now always runs; the not-enrolled stand-in moved to its own module for tests. Version 4.0.0 is revoked.
+
 ## 4.0.0
 
 Security hardening release. Upgrading from 3.x requires running `enroll` once; see the README.

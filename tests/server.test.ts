@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { NotEnrolledError } from "../src/config";
-import { notEnrolledApi } from "../src/index";
+import { notEnrolledApi } from "../src/notEnrolledApi";
 import { DATA_ENVELOPE_HEADER } from "../src/policy";
 import { createServer } from "../src/server";
 import { VERSION } from "../src/version";
