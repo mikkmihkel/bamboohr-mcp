@@ -168,7 +168,7 @@ Send HR users the link to the [latest release](https://github.com/mikkmihkel/bam
 
 - Install guide for HR (Estonian): [docs/PAIGALDUSJUHEND.md](docs/PAIGALDUSJUHEND.md)
 - Scripted rollout: `echo "$KEY" | node dist/index.js enroll --subdomain acme --key-stdin` reads the key from standard input so it never appears in a command line or shell history.
-- Bump `version` in `package.json` and `manifest.json`, add a `CHANGELOG.md` section, tag `vX.Y.Z` and push the tag, or run the **Release** workflow manually with the version as input. Either way the workflow builds, signs and publishes the bundle and, on a manual run, creates the tag. `npm run bundle` builds an unsigned copy locally for testing; it is git-ignored on purpose.
+- Releases are cut from `main` only: merge the change, then either tag `vX.Y.Z` on `main` and push the tag, or run the **Release** workflow manually on `main` with the version as input (it creates the tag). The workflow refuses any commit that `main` does not contain, checks that the version matches `package.json` and `manifest.json`, and builds, signs and publishes the bundle. `npm run bundle` builds an unsigned copy locally for testing; it is git-ignored on purpose.
 
 ## Example questions
 
