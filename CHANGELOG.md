@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.1.0 (2026-09-22)
+
+### Fixed
+
+- **The connector never asked for the API key.** Installed as a Claude Desktop extension it had no way to obtain one: the manifest declared no `user_config`, so the install dialog asked for nothing and every tool answered with an enrolment command to paste into a terminal. Worse, that command could not work as printed — under Claude Desktop `process.execPath` is Claude's own Electron helper, which opens a window and ignores the script unless `ELECTRON_RUN_AS_NODE=1` is set. The manifest now declares the subdomain, the API key (as a `sensitive` field, so Claude Desktop keeps it in the OS credential store rather than in a config file) and an optional vacation type, and passes them to the server in the environment. The printed enrolment command now sets `ELECTRON_RUN_AS_NODE=1` when the runtime is not plain `node`.
+- A missing or malformed subdomain no longer exits the process at start-up. Like a missing key, it now leaves the server running and reports itself on every tool call, instead of leaving Claude Desktop with a connector that failed to start.
+
+### Changed
+
+- `BAMBOOHR_API_KEY` is read at start-up, and only that name. A key supplied that way is copied into this machine's OS credential store on the first start, so one pass through the install dialog also enrols the `status`, `doctor` and `logs` commands. A key from the dialog takes precedence over a stored one, so changing it in Claude Desktop takes effect. Failure to write the store is a warning on stderr, never a failed start.
+- A start-up that has a key writes the subdomain to `config.json`, so the command line reports the install the user actually has.
+- An unsubstituted `${user_config.x}` placeholder is ignored rather than taken for a value.
+
 ## 4.0.1 (2026-09-22)
 
 ### Fixed

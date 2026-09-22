@@ -23,21 +23,18 @@ It never writes to BambooHR. Nothing is created, approved, adjusted or deleted. 
 
 ## Quick install (Claude Desktop)
 
-No Node.js installation is needed. Claude Desktop ships its own runtime.
+No Node.js installation and no terminal. Claude Desktop ships its own runtime and asks for the two things the connector needs.
 
-1. Download [`bamboohr-mcp.mcpb`](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest/download/bamboohr-mcp.mcpb) from the latest release. Optionally [verify the download](#verifying-a-release).
-2. Double-click it. Claude Desktop opens an install dialog. Click **Install**. The dialog asks for nothing else: no key, no subdomain.
-3. Start a new chat and ask *"Who is out of office this week?"*. The first answer is an error that contains the exact enrolment command for your machine, something like:
+1. Create a BambooHR API key: in BambooHR, click your photo (bottom left) > **API Keys** > **Add New Key**. Copy it; it is shown once.
+2. Download [`bamboohr-mcp.mcpb`](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest/download/bamboohr-mcp.mcpb) from the latest release. Optionally [verify the download](#verifying-a-release).
+3. Double-click it. Claude Desktop opens an install dialog that asks for your **BambooHR subdomain** (`acme` for `acme.bamboohr.com`) and your **BambooHR API key**. Fill both in and click **Install**.
+4. Start a new chat and ask *"Who is out of office this week?"*.
 
-   ```
-   No BambooHR API key is enrolled on this machine. Run:
-   "/Applications/Claude.app/.../node" "/Users/you/Library/Application Support/Claude/Claude Extensions/.../dist/index.js" enroll
-   ```
+The key field is declared `sensitive` in the manifest, so Claude Desktop keeps it in the operating system credential store rather than in its configuration file, and hands it only to this server process. On the first start the connector copies it into the same store under its own name (service `bamboohr-mcp`, account `api-key`), so the `status`, `doctor` and `logs` commands and any non-Desktop use work without a second set-up.
 
-4. Open a terminal (macOS: Terminal, Windows: PowerShell), paste that command and press Enter. It asks for your company subdomain (`acme` for `acme.bamboohr.com`) and then for your API key, which is typed without echo and stored in the operating system credential store. In BambooHR the key is under your photo (bottom left) > **API Keys** > **Add New Key**.
-5. Ask the question again.
+To change the key, the subdomain or the vacation type later: **Settings > Extensions > BambooHR > Configure**. The new values take effect when Claude Desktop restarts the connector.
 
-If double-clicking does nothing, use **Settings > Extensions > Advanced settings > Install Extension** and pick the file. On a Team or Enterprise plan an admin may first need to allow custom extensions. To update later, install the new file; your enrolment stays.
+If double-clicking does nothing, use **Settings > Extensions > Advanced settings > Install Extension** and pick the file. On a Team or Enterprise plan an admin may first need to allow custom extensions. To update later, install the new file; your settings stay.
 
 Estonian install guide for HR users: [docs/PAIGALDUSJUHEND.md](docs/PAIGALDUSJUHEND.md).
 
@@ -51,7 +48,7 @@ Everything below is enforced in code and covered by tests. It is the reason 4.0 
 
 | # | Measure | Where |
 |---|---|---|
-| 1 | **No secrets in config.** The Claude Desktop config launches the binary with no `env` block. The API key is captured once by `enroll` and lives in the OS credential store: macOS Keychain (`security`), Windows DPAPI (current-user scope, file under `%LOCALAPPDATA%`), Linux Secret Service (`secret-tool`). The key is read from there at every start and is never accepted from an environment variable, a config file or a tool argument. During enrolment it is handed to the OS helper on standard input (`security -i`, PowerShell, `secret-tool`), never on a command line, and helpers are called by absolute path without a shell. Without a key every tool returns an error with the enrolment command. | `src/credentialStore.ts`, `src/config.ts`, `src/cli.ts` |
+| 1 | **The key never lands in a config file.** The install dialog collects it as a `sensitive` user_config field, so Claude Desktop keeps it in the OS credential store and passes it only in this server process's environment, in `BAMBOOHR_API_KEY`. On start the connector copies it into the same store under its own name — macOS Keychain (`security`), Windows DPAPI (current-user scope, file under `%LOCALAPPDATA%`), Linux Secret Service (`secret-tool`) — and reads it from there whenever the dialog is out of the picture, which is how the `enroll` command works outside Claude Desktop. No other variable name, config file or tool argument is ever consulted for it. The key is handed to the OS helper on standard input (`security -i`, PowerShell, `secret-tool`), never on a command line, and helpers are called by absolute path without a shell. Without a key every tool returns an error that says where to set one. | `src/credentialStore.ts`, `src/config.ts`, `src/cli.ts`, `manifest.json` |
 | 2 | **Field allow-list, not deny-list.** `bamboohr_get_employee` and `bamboohr_employee_report` accept only fields on an explicit set defined in code (name, job, department, division, location, supervisor, hire and termination dates, status, work contact, employee number). Custom fields, where company-specific salary or bank fields usually live, must pass three checks: the BambooHR field type is not a money, id, bank or protected-characteristic type; neither alias nor display name matches a blocked pattern (English and Estonian vocabulary, unanchored, so "Net pay", "Töötasu" or "Pangakonto" are caught); and, when the administrator has set an explicit list with `enroll --allow-custom-field`, the alias is on that list. `--no-custom-fields` refuses every custom field. Anything else is refused before the HTTP call with an "excluded by policy" message. | `src/policy.ts` |
 | 3 | **Compensation blocked at the tool boundary.** `bamboohr_table_rows` refuses `compensation`, `bonus`, `commission`, bank, direct deposit, payroll and any custom table whose alias matches. `bamboohr_list_tables` does not list them. `payRate`, `payRateEffectiveDate`, `payType`, `payPer`, `payGroup`, `paidPer`, `ssn`, `nationalId`, bank fields and more are excluded everywhere. | `src/policy.ts`, `src/tools/employees.ts` |
 | 4 | **Post-response scrub pass.** Before any payload is returned, the whole response object is walked and keys matching the blocked patterns (pay, salary, bonus, commission, wage, bank, IBAN, SWIFT, routing, account number, tax, SSN, national id, passport, date of birth, gender, marital status, ethnicity, nationality, citizenship, religion, disability, medical, home contact, address, emergency contact) are removed. It runs on every tool, including responses the allow-list already filtered, so fields BambooHR adds later do not leak by default. | `src/policy.ts`, `src/tools/shared.ts` |
@@ -70,7 +67,7 @@ Standard fields: `id`, `displayName`, `firstName`, `lastName`, `preferredName`, 
 
 ### Commands
 
-Run these with the same `node` and `index.js` path that the enrolment error prints, or with `node dist/index.js` from a source checkout.
+Only needed outside Claude Desktop, or for a look at what an install is doing. Run them with `node dist/index.js` from a source checkout, or with the exact command the not-enrolled error prints for an installed bundle (under Claude Desktop that command sets `ELECTRON_RUN_AS_NODE=1`, because the runtime there is Claude's own Electron helper rather than `node`, and without it the helper opens a window and ignores the script).
 
 | Command | What it does |
 |---|---|
@@ -83,7 +80,7 @@ Run these with the same `node` and `index.js` path that the enrolment error prin
 
 ### Settings
 
-Non-secret settings live in `config.json` in the app data directory and are written by `enroll`. Environment variables override them for developers; none of them can carry the API key.
+Non-secret settings live in `config.json` in the app data directory, written by `enroll` or by the first start after the install dialog. Environment variables override them; the install dialog feeds `BAMBOOHR_COMPANY_DOMAIN` and `BAMBOOHR_VACATION_TYPE` this way. `BAMBOOHR_API_KEY` is the one variable that carries the key and is not a setting: it is never written to `config.json`, never logged and never returned by any command.
 
 | Setting | Env override | Default | Meaning |
 |---|---|---|---|
@@ -141,7 +138,7 @@ node dist/index.js enroll          # asks for subdomain and key
 node dist/index.js status
 ```
 
-Add the server to Claude Desktop under **Settings > Developer > Edit Config**. Note the absence of an `env` block.
+Add the server to Claude Desktop under **Settings > Developer > Edit Config**. A manual entry needs no `env` block: `enroll` already put the key in the credential store.
 
 ```json
 {
@@ -164,7 +161,7 @@ Smoke test: ask Claude *"List the employee fields that contain 'shoe'."* You sho
 
 ## Distributing to HR
 
-Send HR users the link to the [latest release](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest) plus the install guide. Each user enrols their own key; nothing is shared.
+Send HR users the link to the [latest release](https://github.com/mikkmihkel/bamboohr-mcp/releases/latest) plus the install guide. Each user creates and enters their own key in the install dialog; nothing is shared, and no terminal is involved.
 
 - Install guide for HR (Estonian): [docs/PAIGALDUSJUHEND.md](docs/PAIGALDUSJUHEND.md)
 - Scripted rollout: `echo "$KEY" | node dist/index.js enroll --subdomain acme --key-stdin` reads the key from standard input so it never appears in a command line or shell history.
@@ -255,7 +252,7 @@ The tool Claude reaches for is named in parentheses.
 
 - Data moves from BambooHR to the connector on your machine, and from there into your Claude conversation. The connector stores no BambooHR data: there is no database or cache on disk. Field and table metadata is kept in memory for ten minutes. The audit log holds metadata about calls, never values or names.
 - What you paste into a chat is subject to your organisation's Claude plan and data policy. Employee data is personal data. Ask only what you need, and prefer aggregate questions over dumping whole records.
-- The API key never leaves your machine except in requests to `https://<subdomain>.bamboohr.com`. It is read from the OS credential store, never from a file or an argument, so Claude cannot be talked into using someone else's.
+- The API key never leaves your machine except in requests to `https://<subdomain>.bamboohr.com`. It comes from the extension's install dialog or the OS credential store, never from a file, a tool argument or the conversation, so Claude cannot be talked into using someone else's.
 - The only other network call is the start-up fetch of the revocation list, which sends the version number and nothing else.
 - Revoke a key in BambooHR under **API Keys** if it leaks or when a person leaves, and run `unenroll` on the machine.
 
@@ -263,15 +260,16 @@ The tool Claude reaches for is named in parentheses.
 
 | Symptom | Likely cause and fix |
 |---|---|
-| "No BambooHR API key is enrolled on this machine" | Run the `enroll` command shown in the message. |
-| `401` or "Check that the enrolled API key is valid" | The key is wrong or revoked. Create a new one and run `enroll` again. |
+| "No BambooHR API key is available on this machine" | Open **Settings > Extensions > BambooHR > Configure** and fill in the API key and subdomain. Outside Claude Desktop, run the `enroll` command the message prints. |
+| "is not a bare BambooHR subdomain" | The subdomain field holds a full address. Enter `acme`, not `acme.bamboohr.com` or `https://acme.bamboohr.com`. |
+| `401` or "Check that the enrolled API key is valid" | The key is wrong or revoked. Create a new one and put it in **Configure**, or run `enroll` again. |
 | `403` or "access level does not allow this data" | Your BambooHR access level does not include that data. Ask a BambooHR administrator. |
 | "excluded by policy" | The field or table is outside the allow-list. This is intentional; see [What the allow-list contains](#what-the-allow-list-contains). |
 | "above the per-call limit" | Narrow the query with a department, location, search word, shorter date range or list of ids, or raise `maxRecords` at enrolment. |
 | "requires employeeIds or a filter" | Add a department, location, division, search word or list of ids. |
 | A field you know exists is listed in `missingFields` | Either the key may not see it or the name is off. Run `bamboohr_list_fields` with a search word and use the returned alias. |
 | "This version has been revoked" | Install the latest release. |
-| The vacation overview cannot identify the vacation type | Run `enroll --vacation-type "<exact name>"`. |
+| The vacation overview cannot identify the vacation type | Put the exact type name in the **Vacation time-off type** field under **Configure**, or run `enroll --vacation-type "<exact name>"`. |
 | `secret-tool` not found (Linux) | Install `libsecret-tools` and make sure a Secret Service (GNOME Keyring, KWallet) is running. |
 
 ## Development

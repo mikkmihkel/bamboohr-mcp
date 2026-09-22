@@ -262,7 +262,8 @@ describe("cloud sync and backup exclusion", () => {
     const p = paths();
     const exec = vi.fn();
     createAuditLog(p, { platform: "darwin", exec });
-    expect(exec).toHaveBeenCalledWith("tmutil", ["addexclusion", p.logDir]);
+    // Resolved to /usr/bin/tmutil where that exists, bare name otherwise, so accept either.
+    expect(exec).toHaveBeenCalledWith(expect.stringMatching(/(^|\/)tmutil$/), ["addexclusion", p.logDir]);
     expect(exec.mock.calls.every((c) => c[0] !== "icacls")).toBe(true);
   });
 

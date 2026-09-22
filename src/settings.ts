@@ -4,8 +4,9 @@ import type { AppPaths } from "./appPaths";
 
 /**
  * Non-secret configuration. The BambooHR API key is deliberately NOT part of
- * this interface: it is never read from the environment and never written to a
- * file in clear text, only stored in the OS credential store.
+ * this interface: it is never written to a file in clear text, and the only
+ * variable that may carry it is API_KEY_ENV in config.ts, which the server
+ * copies straight into the OS credential store.
  */
 export interface Settings {
   /** BambooHR subdomain: "acme" for acme.bamboohr.com. */
@@ -51,10 +52,20 @@ function defaults(): Settings {
   return { enableSensitiveTools: false, maxRecords: DEFAULT_MAX_RECORDS, strictSelfCheck: false };
 }
 
+/**
+ * `${user_config.x}` left as written. Claude Desktop substitutes the values it
+ * collected in the install dialog, but a host that skips an optional field
+ * would otherwise turn the placeholder itself into a setting.
+ */
+export function isUnsubstitutedPlaceholder(value: string): boolean {
+  return /^\$\{[^}]*\}$/.test(value.trim());
+}
+
 function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
+  if (trimmed === "" || isUnsubstitutedPlaceholder(trimmed)) return undefined;
+  return trimmed;
 }
 
 function asBoolean(value: unknown): boolean | undefined {
@@ -145,9 +156,10 @@ function apply(into: Settings, layer: {
 }
 
 /**
- * Settings from config.json, then non-secret environment overrides on top.
- * BAMBOOHR_TOKEN is not consulted anywhere: an API key in the environment would
- * end up in process listings, crash dumps and Claude Desktop's config file.
+ * Settings from config.json, then non-secret environment overrides on top. The
+ * Claude Desktop install dialog supplies the first two of these. No key is read
+ * here under any name: the one variable that may carry a key is handled in
+ * config.ts, which never lets it reach a settings file.
  */
 export function readSettings(paths: AppPaths, env: NodeJS.ProcessEnv = process.env): Settings {
   const settings = defaults();

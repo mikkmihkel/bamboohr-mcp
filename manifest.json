@@ -3,9 +3,9 @@
   "manifest_version": "0.2",
   "name": "bamboohr-mcp",
   "display_name": "BambooHR",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "description": "Ask Claude about your BambooHR data: who is out, vacation balances, employee fields and tables, training and holidays. Read-only, with a field allow-list, compensation and identity fields blocked, per-call record caps and a local audit log.",
-  "long_description": "Connects Claude Desktop to BambooHR with your own API key. You see at most what you can see in BambooHR; the connector never creates, approves or changes anything.\n\n**Use cases**\n\n- Absence planning: who is out this week, which requests are waiting for approval, which public holidays are left.\n- Vacation follow-up: unplanned vacation days per employee in a department and who has not taken a continuous 14-day block.\n- Employee lookups: hire date, job title, supervisor, work contact details and company-specific custom fields such as shoe size or equipment.\n- Small targeted reports: a few work-related fields for a named department, location or list of employees.\n- Training compliance: required training types and one employee's completed trainings.\n- Access reviews: BambooHR login accounts and recent record changes.\n\n**Hardened by design**\n\n- The API key is captured once by the `enroll` command and kept in the operating system credential store (Keychain, DPAPI, Secret Service). Nothing sensitive is passed through the Claude Desktop config.\n- Standard employee fields are allow-listed in code. Custom fields must pass a field-type check and a blocked-name list (English and Estonian), or an explicit per-install allow-list. Pay, bank, tax, national id, date of birth, home contact and similar fields are refused and scrubbed from every response.\n- Compensation, bonus, commission and bank tables are blocked. Dependents and employee files are disabled unless an administrator enables them.\n- Sick leave is reduced to a generic absence and cannot be selected by type. Bulk retrieval is capped per call and needs an explicit employee or filter.\n- Every call is written to a local, owner-only audit log without values or names. Free text from BambooHR is marked as untrusted data.\n\nRead-only usage limits are enforced by this connector, but an API key that has write access in BambooHR always carries risk. Use a key with the narrowest access level you can. The repository owner accepts no responsibility for any use of this software.",
+  "long_description": "Connects Claude Desktop to BambooHR with your own API key. You see at most what you can see in BambooHR; the connector never creates, approves or changes anything.\n\n**Use cases**\n\n- Absence planning: who is out this week, which requests are waiting for approval, which public holidays are left.\n- Vacation follow-up: unplanned vacation days per employee in a department and who has not taken a continuous 14-day block.\n- Employee lookups: hire date, job title, supervisor, work contact details and company-specific custom fields such as shoe size or equipment.\n- Small targeted reports: a few work-related fields for a named department, location or list of employees.\n- Training compliance: required training types and one employee's completed trainings.\n- Access reviews: BambooHR login accounts and recent record changes.\n\n**Hardened by design**\n\n- The install dialog asks for the API key as a sensitive field, so Claude Desktop keeps it in the operating system credential store (Keychain, DPAPI, Secret Service) rather than in a config file, and the connector copies it into the same store under its own name. A terminal `enroll` command does the same without Claude Desktop.\n- Standard employee fields are allow-listed in code. Custom fields must pass a field-type check and a blocked-name list (English and Estonian), or an explicit per-install allow-list. Pay, bank, tax, national id, date of birth, home contact and similar fields are refused and scrubbed from every response.\n- Compensation, bonus, commission and bank tables are blocked. Dependents and employee files are disabled unless an administrator enables them.\n- Sick leave is reduced to a generic absence and cannot be selected by type. Bulk retrieval is capped per call and needs an explicit employee or filter.\n- Every call is written to a local, owner-only audit log without values or names. Free text from BambooHR is marked as untrusted data.\n\nRead-only usage limits are enforced by this connector, but an API key that has write access in BambooHR always carries risk. Use a key with the narrowest access level you can. The repository owner accepts no responsibility for any use of this software.",
   "author": {
     "name": "Mikk Mihkel Vaabel"
   },
@@ -38,7 +38,34 @@
       "command": "node",
       "args": [
         "${__dirname}/dist/index.js"
-      ]
+      ],
+      "env": {
+        "BAMBOOHR_API_KEY": "${user_config.api_key}",
+        "BAMBOOHR_COMPANY_DOMAIN": "${user_config.subdomain}",
+        "BAMBOOHR_VACATION_TYPE": "${user_config.vacation_type}"
+      }
+    }
+  },
+  "user_config": {
+    "subdomain": {
+      "type": "string",
+      "title": "BambooHR subdomain",
+      "description": "The first part of your BambooHR address only: \"acme\" for acme.bamboohr.com.",
+      "required": true
+    },
+    "api_key": {
+      "type": "string",
+      "title": "BambooHR API key",
+      "description": "In BambooHR, click your photo (bottom left) > API Keys > Add New Key. Claude Desktop keeps this in your operating system credential store; the connector copies it into the same store under its own name and never writes it to a config file or a log.",
+      "required": true,
+      "sensitive": true
+    },
+    "vacation_type": {
+      "type": "string",
+      "title": "Vacation time-off type (optional)",
+      "description": "Name of the time-off type that counts as vacation, e.g. \"Vacation\" or \"Pohipuhkus\". Leave empty to detect it automatically.",
+      "required": false,
+      "default": ""
     }
   },
   "tools": [

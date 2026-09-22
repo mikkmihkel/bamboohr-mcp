@@ -6,14 +6,13 @@ import { createBambooHRApi, type BambooHRApi } from "./bamboohr";
 import { notEnrolledApi } from "./notEnrolledApi";
 import { createClient } from "./client";
 import { isSubcommand, runCli } from "./cli";
-import { ConfigError, enrolmentCommand, loadConfig, NotEnrolledError } from "./config";
+import { ConfigError, DESKTOP_SETTINGS_HINT, enrolmentCommand, loadConfig } from "./config";
 import { CredentialStoreError } from "./credentialStore";
 import { runSelfCheck } from "./selfCheck";
 import { createServer } from "./server";
 import { DEFAULT_REVOCATION_URL, readSettings } from "./settings";
 import { VERSION } from "./version";
 
-const EXIT_CONFIG = 1;
 const EXIT_SELF_CHECK = 3;
 
 async function main() {
@@ -51,21 +50,23 @@ async function main() {
   try {
     const config = await loadConfig({ paths });
     api = createBambooHRApi(createClient(config));
+    for (const warning of config.warnings) console.error(`bamboohr-mcp: ${warning}`);
     banner = `connected to ${config.companyDomain}.bamboohr.com over stdio`;
   } catch (e) {
-    if (e instanceof NotEnrolledError) {
-      api = notEnrolledApi(e);
-      banner = `started without credentials — ${e.message}`;
-    } else if (e instanceof CredentialStoreError) {
-      // A locked keyring or a missing helper must not take the server down
-      // either: start, list the tools, and answer every call with the reason.
-      const reason = new Error(`${e.message}. ${e.hint} Then run: ${enrolmentCommand()}`);
+    if (e instanceof CredentialStoreError) {
+      // A locked keyring or a missing helper must not take the server down:
+      // start, list the tools, and answer every call with the reason.
+      const reason = new Error(`${e.message}. ${e.hint} ${DESKTOP_SETTINGS_HINT} Outside Claude Desktop, run: ${enrolmentCommand()}`);
       reason.name = "CredentialStoreError"; // the audit log records the class name only
       api = notEnrolledApi(reason);
       banner = `started without credentials — ${reason.message}`;
     } else if (e instanceof ConfigError) {
-      console.error(`bamboohr-mcp: ${e.message}`);
-      process.exit(EXIT_CONFIG);
+      // Missing key, missing or malformed subdomain: all of them are things the
+      // user fixes in the extension settings, so the server has to stay up and
+      // say so on every call. Exiting here left Claude Desktop showing nothing
+      // but a failed connector.
+      api = notEnrolledApi(e);
+      banner = `started without credentials — ${e.message}`;
     } else {
       throw e;
     }

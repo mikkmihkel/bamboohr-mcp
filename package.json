@@ -1,6 +1,6 @@
 {
   "name": "bamboohr-mcp",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "description": "Read-only MCP server for BambooHR: employees, custom fields and tables, bulk reports, time off, training, holidays.",
   "license": "MIT",
   "repository": {
