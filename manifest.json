@@ -63,7 +63,7 @@
     "vacation_type": {
       "type": "string",
       "title": "Vacation time-off type (optional)",
-      "description": "Name of the time-off type that counts as vacation, e.g. \"Vacation\" or \"Pohipuhkus\". Leave empty to detect it automatically.",
+      "description": "Name of the time-off type that counts as vacation, e.g. \"Vacation\" or \"Põhipuhkus\". Leave empty to detect it automatically.",
       "required": false,
       "default": ""
     }
