@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.2.0 (unreleased)
+## 4.2.0 (2026-09-23)
 
 ### Fixed
 
@@ -14,7 +14,7 @@
 ### Changed
 
 - Holidays no longer count toward the per-call record cap of `bamboohr_whos_out`.
-- User documentation is shorter: `README.md` and `README.et.md` are user guides, the technical reference moved to `docs/ADMIN.md`, and `docs/PAIGALDUSJUHEND.md` merged into `README.et.md`. Added `SECURITY.md`.
+- User documentation is shorter: `README.md` and `README.et.md` are user guides, the technical reference moved to `docs/ADMIN.md`, and `docs/PAIGALDUSJUHEND.md` merged into `README.et.md`.
 
 ## 4.1.0 (2026-09-22)
 

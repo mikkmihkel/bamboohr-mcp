@@ -69,7 +69,7 @@ If you ask for any of these, Claude says the field is *excluded by policy*. That
 
 ## For administrators and developers
 
-Security design, settings, command line, Claude Code setup, release verification and development: [docs/ADMIN.md](docs/ADMIN.md). Report security issues as described in [SECURITY.md](SECURITY.md). Changes: [CHANGELOG.md](CHANGELOG.md).
+Security design, settings, command line, Claude Code setup, release verification and development: [docs/ADMIN.md](docs/ADMIN.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

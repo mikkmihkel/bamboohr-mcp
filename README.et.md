@@ -69,7 +69,7 @@ Kui neid küsid, vastab Claude, et väli on reeglitega välistatud („excluded 
 
 ## Administraatorile ja arendajale
 
-Turvalahendus, seaded, käsurida, Claude Code, väljalaske kontrollimine ja arendus (inglise keeles): [docs/ADMIN.md](docs/ADMIN.md). Turvaveast teatamine: [SECURITY.md](SECURITY.md). Muudatused: [CHANGELOG.md](CHANGELOG.md).
+Turvalahendus, seaded, käsurida, Claude Code, väljalaske kontrollimine ja arendus (inglise keeles): [docs/ADMIN.md](docs/ADMIN.md). Muudatused: [CHANGELOG.md](CHANGELOG.md).
 
 ## Litsents
 
