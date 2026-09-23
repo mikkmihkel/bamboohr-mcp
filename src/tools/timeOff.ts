@@ -37,7 +37,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Who's out",
       description:
-        "List employees who are out of office and company holidays in a date range. Defaults to today through 14 days ahead. Each entry has type 'timeOff' (with employeeId and employee name) or 'holiday' (holiday name only). A range with more entries than the per-call record limit is refused; use a shorter range.",
+        "List employees who are out of office and company holidays in a date range. Defaults to today through 14 days ahead. Each entry has type 'timeOff' (with employeeId and employee name) or 'holiday' (holiday name only). A range with more people out than the per-call record limit is refused (holidays do not count); use a shorter range.",
       inputSchema: {
         start: isoDate.optional().describe("First day of the range, YYYY-MM-DD. Default: today."),
         end: isoDate.optional().describe("Last day of the range, YYYY-MM-DD. Default: start + 14 days."),
@@ -50,7 +50,8 @@ export function register(server: McpServer, ctx: ToolContext): void {
         const e = end ?? addDays(s, 14);
         assertRange(s, e);
         const entries = await api.getWhosOut(s, e);
-        enforceRecordLimit(entries.length, maxRecords(), "Use a shorter date range.");
+        // Holidays are not personal data and do not count toward the cap.
+        enforceRecordLimit(entries.filter((x) => x.type === "timeOff").length, maxRecords(), "Use a shorter date range.");
         return entries;
       })
   );

@@ -24,7 +24,7 @@ export interface Settings {
   maxRecords: number;
   /** Where the start-up self-check looks for revoked versions. */
   revocationUrl?: string;
-  /** true: refuse to start when the self-check endpoint is unreachable. */
+  /** true: serve no data when the self-check endpoint is unreachable. */
   strictSelfCheck: boolean;
 }
 
@@ -48,7 +48,8 @@ export class SettingsError extends Error {
   }
 }
 
-function defaults(): Settings {
+/** Built-in defaults: sensitive tools off, the default record cap. */
+export function defaultSettings(): Settings {
   return { enableSensitiveTools: false, maxRecords: DEFAULT_MAX_RECORDS, strictSelfCheck: false };
 }
 
@@ -162,7 +163,7 @@ function apply(into: Settings, layer: {
  * config.ts, which never lets it reach a settings file.
  */
 export function readSettings(paths: AppPaths, env: NodeJS.ProcessEnv = process.env): Settings {
-  const settings = defaults();
+  const settings = defaultSettings();
   apply(settings, readFileSettings(paths.configFile));
   apply(settings, {
     companyDomain: env.BAMBOOHR_COMPANY_DOMAIN,
@@ -212,8 +213,20 @@ export function writeSettings(paths: AppPaths, patch: Partial<Settings>): void {
   }
 
   fs.mkdirSync(path.dirname(paths.configFile), { recursive: true, mode: DIR_MODE });
-  fs.writeFileSync(paths.configFile, `${JSON.stringify(merged, null, 2)}\n`, { mode: FILE_MODE });
-  // writeFileSync only applies `mode` when it creates the file; chmod covers rewrites.
+  // Write a temporary file and rename it over config.json: the server rewrites the file
+  // on start-up, and an interrupted in-place write would leave it unreadable.
+  const tmp = `${paths.configFile}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, { mode: FILE_MODE });
+    fs.renameSync(tmp, paths.configFile);
+  } catch (e) {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // nothing left to clean up
+    }
+    throw e;
+  }
   try {
     fs.chmodSync(paths.configFile, FILE_MODE);
     fs.chmodSync(path.dirname(paths.configFile), DIR_MODE);

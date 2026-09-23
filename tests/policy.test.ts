@@ -18,6 +18,7 @@ import {
   envelope,
   isBlockedKey,
   isBlockedTable,
+  tableColumnPolicy,
   isSickType,
   reduceSickRequest,
   requireFilter,
@@ -157,15 +158,35 @@ describe("isBlockedTable", () => {
     "compensation", "bonus", "commission", "customBonus", "customCommission", "bankAccounts",
     "directDeposit", "direct_deposit", "payroll", "payInfo", "salaryHistory", "emergencyContacts",
     "dependents", "dependent", "benefits", "customBenefitElections",
+    // standard tables outside the allow-list (BambooHR's documented table names)
+    "earnings", "employeeProjectPayRates", "levelsAndBands", "employeeStockOptions", "employeeEquityGrants",
+    "employeePassports", "employeeVisas", "employeeDriverLicenses", "employeeCreditCards",
+    "employeeCovidTests", "employeeCovidVaccinations", "employeeCovidVaccinationExemptions", "employeeCovidExposures",
+    "contacts", "benefit_class", "someFutureTable", "timeOff",
+    // custom tables whose alias names a sensitive subject
+    "customPassports", "customCovidTests", "customStockGrants",
   ])("blocks the table %s", (alias) => {
     expect(isBlockedTable(alias)).toBe(true);
   });
 
   it.each([
-    "jobInfo", "employmentStatus", "customEquipment", "customCertificates", "customOnboarding",
-    "timeOff", "training",
+    "jobInfo", "jobInformation", "employmentStatus", "employeeEducation", "employeeCertifications", "employeeAssets",
+    "customEquipment", "customCertificates", "customOnboarding", "custom1",
   ])("allows the table %s", (alias) => {
     expect(isBlockedTable(alias)).toBe(false);
+  });
+});
+
+describe("tableColumnPolicy", () => {
+  it("drops money-typed and sensitively named columns, keyed by id, name and alias", () => {
+    const { allowed, blockedKeys } = tableColumnPolicy([
+      { id: "1", name: "Item", alias: "customItem", type: "text" },
+      { id: "2", name: "Allowance", alias: "customAllowance", type: "currency" },
+      { id: "3", name: "Passport number", type: "text" },
+      { id: "4", name: "Date", alias: "customDate", type: "date" },
+    ]);
+    expect(allowed.map((c) => c.id)).toEqual(["1", "4"]);
+    expect([...blockedKeys].sort()).toEqual(["2", "3", "Allowance", "Passport number", "customAllowance"].sort());
   });
 });
 

@@ -16,13 +16,13 @@ Enforced in code and covered by tests.
 |---|---|
 | **Key never in a file.** The install dialog takes it as a `sensitive` field; Claude Desktop keeps it in the OS credential store and passes it only in `BAMBOOHR_API_KEY`. On start the server copies it into the store under service `bamboohr-mcp`, account `api-key` (macOS Keychain, Windows DPAPI under `%LOCALAPPDATA%`, Linux Secret Service), so the CLI works too. Helpers get the key on stdin, by absolute path, without a shell. | `credentialStore.ts`, `config.ts` |
 | **Field allow-list.** Standard fields: `id`, names, `jobTitle`, `department`, `division`, `location`, supervisor fields, hire/termination dates, status, work email/phones, `mobilePhone`, `employeeNumber`, `lastChanged`. Custom fields pass only if their BambooHR type is not money/id/bank/protected, and neither alias nor name matches a blocked pattern (English and Estonian). | `policy.ts` |
-| **Compensation blocked.** Compensation, bonus, commission, bank, direct deposit and payroll tables are refused and hidden. Pay, SSN, national id and bank fields are excluded everywhere. | `policy.ts` |
+| **Tables allow-listed.** Standard tables are closed unless listed: `jobInfo`, `employmentStatus`, `employeeEducation`, `employeeCertifications`, `employeeAssets`. So compensation, earnings, equity, passports, visas, driver licences, credit cards, COVID and contact tables are refused and hidden. Custom tables pass unless their alias names a sensitive subject, and columns of a money/id type or a sensitive name are dropped. Pay, SSN, national id and bank fields are excluded everywhere. | `policy.ts` |
 | **Response scrub.** Every payload is walked and keys matching blocked patterns (pay, bank, tax, national id, date of birth, gender, nationality, medical, home address, emergency contact and more) are removed, including fields BambooHR adds later. | `policy.ts`, `tools/shared.ts` |
 | **Sensitive tools off.** Dependents and files tools are not registered unless enabled. Sick leave is reduced to `absent`; health-related types are hidden and refused as filters; sick balances are omitted. | `tools/people.ts`, `tools/timeOff.ts` |
 | **Bulk capped.** Default 25 records per call (1–500). Company-wide tools need an id or a filter. Over the cap the call is refused, never truncated silently. | `policy.ts` |
 | **Audit log without values.** One JSON line per call: time, tool, field names, safe filters, count, outcome. Never values, names, search strings or bodies. Employee ids are HMAC-hashed with a local salt. Owner-only permissions, 5 MiB rotation × 5 files, 90-day retention, excluded from Time Machine/OneDrive. No network code. | `audit.ts`, `appPaths.ts` |
 | **Untrusted text.** Results are wrapped in a nonce-marked data envelope; free-text fields are marked as untrusted, control characters stripped. | `policy.ts`, `tools/shared.ts` |
-| **Supply chain.** Releases are built by GitHub Actions from `main`, signed with Sigstore, attested with SLSA provenance, published with SHA-256 sums. Actions pinned by SHA; no `npx` at build or run time. A revoked version refuses to start. | `.github/workflows/release.yml`, `selfCheck.ts` |
+| **Supply chain.** Releases are built by GitHub Actions from `main`, signed with Sigstore, attested with SLSA provenance, published with SHA-256 sums. Actions pinned by SHA; no `npx` at build or run time. A revoked version serves no data and tells the user to update. | `.github/workflows/release.yml`, `selfCheck.ts` |
 
 Out of scope: the server cannot see which Claude account is signed in (use SSO, domain capture and managed deployment), and the local log is not an audit-grade record (use BambooHR's own API logs).
 
@@ -38,7 +38,7 @@ Stored in `config.json` in the data directory (`status` prints the path). Enviro
 | `enableSensitiveTools` | `BAMBOOHR_ENABLE_SENSITIVE_TOOLS` | `false` | Registers dependents and files tools |
 | `allowedCustomFields` | `BAMBOOHR_ALLOWED_CUSTOM_FIELDS` | unset | Comma list: only these custom aliases. Empty: none |
 | `revocationUrl` | `BAMBOOHR_REVOCATION_URL` | this repo | HTTPS URL of the revocation list |
-| `strictSelfCheck` | `BAMBOOHR_STRICT_SELF_CHECK` | `false` | Refuse to start if the list is unreachable |
+| `strictSelfCheck` | `BAMBOOHR_STRICT_SELF_CHECK` | `false` | Serve no data if the list is unreachable |
 | data directory | `BAMBOOHR_MCP_DATA_DIR` | per OS | macOS `~/Library/Application Support/bamboohr-mcp`, Windows `%LOCALAPPDATA%\bamboohr-mcp`, Linux `~/.local/state/bamboohr-mcp` |
 
 Name-based field checks are heuristics. Where it matters, pin an explicit list:
@@ -93,7 +93,7 @@ gh attestation verify bamboohr-mcp.mcpb --repo mikkmihkel/bamboohr-mcp
 
 ## Version revocation list
 
-At start-up the server fetches [`revocations.json`](../revocations.json) and refuses to run if its version is listed or below `minimumVersion`. Organisations can host their own copy and set `--revocation-url`. Unreachable list: warning only, unless `--strict-self-check`.
+After connecting, the server fetches [`revocations.json`](../revocations.json). If its version is listed or below `minimumVersion`, every tool call answers with the reason and a link to the latest release; no BambooHR data is served. Organisations can host their own copy and set `--revocation-url`. Unreachable list: warning only, unless `--strict-self-check`.
 
 ```json
 { "schemaVersion": 1, "minimumVersion": "4.0.1", "revokedVersions": ["4.0.0"], "message": "why" }
@@ -112,10 +112,10 @@ At start-up the server fetches [`revocations.json`](../revocations.json) and ref
 | `bamboohr_list_fields` / `bamboohr_list_tables` | Field and table metadata, with policy status |
 | `bamboohr_get_employee` | One employee's allowed fields (own record if no id) |
 | `bamboohr_employee_report` | Allowed fields for ids, department, location or division |
-| `bamboohr_table_rows` | One allowed table for one employee |
+| `bamboohr_table_rows` | One allowed table for one employee, blocked columns dropped |
 | `bamboohr_changed_employees` | Ids changed since a timestamp |
 | `bamboohr_training_types` / `bamboohr_training_records` | Training catalogue; one employee's trainings |
-| `bamboohr_list_users` | BambooHR login accounts, status, last login |
+| `bamboohr_list_users` | BambooHR login accounts, status, last login (no email: BambooHR may fill it with a home address) |
 | `bamboohr_company_holidays` | Holidays in a range (default: this year) |
 | `bamboohr_employee_dependents` / `bamboohr_employee_files` | Off by default; files are metadata only |
 

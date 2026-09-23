@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { compact, DEFAULT_EMPLOYEE_FIELDS, MAX_REPORT_FIELDS, missingFields, REPORT_ALWAYS_FIELDS } from "../fields";
-import { assertAllFieldsAllowed, enforceRecordLimit, isBlockedTable, PolicyError, requireFilter } from "../policy";
+import { assertAllFieldsAllowed, enforceRecordLimit, isBlockedTable, PolicyError, requireFilter, tableColumnPolicy } from "../policy";
 import type { ReportRow } from "../types";
 import { READ_ONLY, positiveInt, run, type ToolContext } from "./shared";
 
@@ -147,7 +147,7 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "Table rows",
       description:
-        "Read the rows of an employee table for ONE employee: job history (jobInfo), employmentStatus, or any custom table (e.g. equipment, certificates). employeeId is required. Pay, compensation, bonus, commission, bank and similar tables are excluded by policy and are refused. Get valid table aliases from bamboohr_list_tables. Rows are unsorted; sort by date yourself.",
+        "Read the rows of an employee table for ONE employee: job history (jobInfo), employmentStatus, or any custom table (e.g. equipment, certificates). employeeId is required. Pay, compensation, bank, identity-document, health and similar tables are excluded by policy and are refused; money-type columns are dropped. Get valid table aliases from bamboohr_list_tables. Rows are unsorted; sort by date yourself.",
       inputSchema: {
         table: tableAlias.describe("Table alias, e.g. jobInfo, employmentStatus, customEquipment."),
         employeeId: positiveInt.describe("Internal employee id. Required: this tool reads one employee at a time."),
@@ -164,14 +164,18 @@ export function register(server: McpServer, ctx: ToolContext): void {
           if (isBlockedTable(table)) {
             throw new PolicyError(
               "table_excluded",
-              `Table "${table}" is excluded by policy (compensation, bonus, commission, bank and similar tables are never read).`
+              `Table "${table}" is excluded by policy (pay, bank, identity-document, health and similar tables are never read; standard tables outside job, employment status, education, certifications and assets are closed).`
             );
           }
-          const aliases = await ctx.tableAliases();
-          if (!aliases.includes(table)) {
-            throw new Error(`Unknown table "${table}". Valid tables: ${aliases.join(", ")}`);
+          const tables = await ctx.tables();
+          const meta = tables.find((t) => t.alias === table);
+          if (!meta) {
+            throw new Error(`Unknown table "${table}". Valid tables: ${tables.map((t) => t.alias).join(", ")}`);
           }
-          const rows = await api.getTableRows(table, employeeId);
+          const { blockedKeys } = tableColumnPolicy(meta.fields);
+          const rows = (await api.getTableRows(table, employeeId)).map(
+            (row) => Object.fromEntries(Object.entries(row).filter(([key]) => !blockedKeys.has(key))) as typeof row
+          );
           return { table, rows };
         }
       )

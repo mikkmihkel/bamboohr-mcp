@@ -62,7 +62,7 @@ Kui neid küsid, vastab Claude, et väli on reeglitega välistatud („excluded 
 
 - Andmed liiguvad BambooHR-ist sinu arvutis olevasse laiendusse ja sealt Claude'i vestlusesse. BambooHR-i andmeid kettale ei salvestata.
 - Kohalik auditilogi märgib, *milline* tööriist käivitati ja *milliseid* välju küsiti, aga mitte kunagi väärtusi ega nimesid. Logi ei saadeta kuhugi.
-- Võti saadetakse ainult aadressile `https://<alamdomeen>.bamboohr.com`. Ainus teine päring on käivitamisel tehtav versioonikontroll, mis sinu kohta midagi ei saada.
+- Võti saadetakse ainult aadressile `https://<alamdomeen>.bamboohr.com`. Ainus teine päring on käivitamisel tehtav versioonikontroll, mis saadab ainult versiooninumbri.
 - Kui võti lekib, kustuta see BambooHR-is jaotises **API Keys**. Tööriista eemaldamiseks: **Settings → Extensions → BambooHR → Uninstall**.
 
 > **„Ainult lugemise" tagab see laiendus, mitte BambooHR.** API-võtmel on samad õigused kui kontol, millega see loodi. Kasuta võimalikult kitsaste õigustega kontot. Tarkvara antakse MIT-litsentsi alusel „nagu on", ilma garantii ja vastutuseta; oma organisatsiooni andmekaitsekohustuste eest vastutad sina.

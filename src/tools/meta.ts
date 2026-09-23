@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { mergeFieldOptions, searchFields } from "../fields";
-import { enforceRecordLimit, isBlockedTable, resolveAllowedFields, type FieldPolicyOptions } from "../policy";
+import { enforceRecordLimit, resolveAllowedFields, tableColumnPolicy, type FieldPolicyOptions } from "../policy";
 import type { BambooUser, FieldMeta } from "../types";
 import { READ_ONLY, assertRange, isoDate, run, type ToolContext } from "./shared";
 
@@ -16,7 +16,7 @@ function isAllowedField(field: FieldMeta, options: FieldPolicyOptions): boolean 
 }
 
 function matchesUser(user: BambooUser, needle: string): boolean {
-  const haystack = `${user.firstName} ${user.lastName} ${user.email ?? ""}`.toLowerCase();
+  const haystack = `${user.firstName} ${user.lastName}`.toLowerCase();
   return haystack.includes(needle);
 }
 
@@ -54,13 +54,13 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "List employee tables",
       description:
-        "List the tabular fields this server may read (job history, employment status, and custom tables such as equipment or certificates) with the table alias and its columns. Compensation, bonus, commission, bank and similar tables are excluded by policy and are not listed. Use the alias with bamboohr_table_rows.",
+        "List the tabular fields this server may read (job history, employment status, and custom tables such as equipment or certificates) with the table alias and its columns. Compensation, bonus, bank, identity-document, health and similar tables, and money-type columns, are excluded by policy and are not listed. Use the alias with bamboohr_table_rows.",
       inputSchema: {},
       annotations: READ_ONLY,
     },
     async () =>
       run(ctx, { tool: "bamboohr_list_tables" }, async () =>
-        (await api.getTables()).filter((t) => !isBlockedTable(t.alias))
+        (await ctx.tables()).map((t) => ({ alias: t.alias, fields: tableColumnPolicy(t.fields).allowed }))
       )
   );
 
@@ -91,10 +91,10 @@ export function register(server: McpServer, ctx: ToolContext): void {
     {
       title: "List BambooHR users",
       description:
-        "List BambooHR user accounts (people who can log in) with their linked employee id, email, status and last login. Useful for access reviews: who has an enabled account, who never logged in. Narrow the list with status or search; more accounts than the per-call record limit are refused.",
+        "List BambooHR user accounts (people who can log in) with their linked employee id, status and last login (no email: BambooHR may return a home address there). Useful for access reviews: who has an enabled account, who never logged in. Narrow the list with status or search; more accounts than the per-call record limit are refused.",
       inputSchema: {
         status: z.enum(["enabled", "disabled"]).optional().describe("Only accounts with this status. Default: all."),
-        search: z.string().trim().min(1).optional().describe("Case-insensitive substring of the first name, last name or email."),
+        search: z.string().trim().min(1).optional().describe("Case-insensitive substring of the first or last name."),
       },
       annotations: READ_ONLY,
     },

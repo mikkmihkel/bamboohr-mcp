@@ -122,6 +122,13 @@ describe("writeSettings", () => {
     expect(readSettings(paths, {}).companyDomain).toBe("acme");
   });
 
+  it("replaces the file atomically and leaves no temporary file behind", () => {
+    writeSettings(paths, { companyDomain: "acme" });
+    writeSettings(paths, { maxRecords: 40 });
+    expect(fs.readdirSync(path.dirname(paths.configFile)).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+    expect(readSettings(paths, {})).toMatchObject({ companyDomain: "acme", maxRecords: 40 });
+  });
+
   it("merges into the existing file and keeps it 0600", () => {
     writeSettings(paths, { companyDomain: "acme", maxRecords: 50 });
     writeSettings(paths, { vacationType: "Puhkus" });

@@ -231,16 +231,33 @@ describe("bamboohr_table_rows", () => {
     const ok = await client.callTool({ name: "bamboohr_table_rows", arguments: { table: "customEquipment", employeeId: 7 } });
     expect(api.getTableRows).toHaveBeenCalledWith("customEquipment", 7);
     expect(parseToolPayload(ok)).toEqual({ table: "customEquipment", rows: [{ id: 55, employeeId: 7, customItem: "Laptop" }] });
-    const bad = await client.callTool({ name: "bamboohr_table_rows", arguments: { table: "nope", employeeId: 7 } });
+    const bad = await client.callTool({ name: "bamboohr_table_rows", arguments: { table: "customNope", employeeId: 7 } });
     expect(bad.isError).toBe(true);
     expect(toolText(bad)).toMatch(/jobInfo/);
     expect(api.getTables).toHaveBeenCalledTimes(1);
   });
 
+  it("drops columns of a blocked type or name from the rows and the table list", async () => {
+    const api = fakeApi({
+      getTables: vi.fn(async () => [
+        { alias: "customEquipment", fields: [
+          { id: "1", name: "Item", alias: "customItem", type: "text" },
+          { id: "2", name: "Value", alias: "customValue", type: "currency" },
+        ] },
+      ]),
+      getTableRows: vi.fn(async () => [{ id: 55, employeeId: 7, customItem: "Laptop", customValue: "1200 EUR" }]),
+    });
+    const { client } = await connect(api);
+    const rows = await client.callTool({ name: "bamboohr_table_rows", arguments: { table: "customEquipment", employeeId: 7 } });
+    expect(parseToolPayload(rows)).toEqual({ table: "customEquipment", rows: [{ id: 55, employeeId: 7, customItem: "Laptop" }] });
+    const list = await client.callTool({ name: "bamboohr_list_tables", arguments: {} });
+    expect(JSON.stringify(parseToolPayload(list))).not.toContain("customValue");
+  });
+
   it("refuses excluded tables before any metadata lookup", async () => {
     const api = fakeApi({ getTables: vi.fn(async () => { throw new Error("metadata unavailable"); }) });
     const { client, audit } = await connect(api);
-    for (const table of ["compensation", "customBonus", "bankAccounts", "directDeposit"]) {
+    for (const table of ["compensation", "customBonus", "bankAccounts", "directDeposit", "earnings", "employeePassports", "employeeCovidTests"]) {
       const res = await client.callTool({ name: "bamboohr_table_rows", arguments: { table, employeeId: 7 } });
       expect(res.isError, table).toBe(true);
       expect(toolText(res), table).toContain("excluded by policy");

@@ -62,7 +62,7 @@ If you ask for any of these, Claude says the field is *excluded by policy*. That
 
 - Data goes from BambooHR to the extension on your computer, and from there into your Claude chat. No BambooHR data is stored on disk.
 - A local audit log records *which* tool ran and *which* fields were asked for, never values or names. It is never sent anywhere.
-- The key is only sent to `https://<subdomain>.bamboohr.com`. The only other request is a version check at start-up that sends nothing about you.
+- The key is only sent to `https://<subdomain>.bamboohr.com`. The only other request is a version check at start-up; it sends only the version number.
 - If a key leaks, delete it in BambooHR under **API Keys**. To remove the extension: **Settings → Extensions → BambooHR → Uninstall**.
 
 > **Read-only is enforced by this extension, not by BambooHR.** An API key has the same rights as the account that created it. Use an account with the narrowest access you need. Provided as is under the MIT licence, without warranty or liability; you are responsible for your organisation's data-protection obligations.

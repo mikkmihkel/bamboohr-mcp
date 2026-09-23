@@ -32,6 +32,20 @@ describe("bamboohr_whos_out", () => {
     expect(toolText(res)).toMatch(/above the per-call limit of 2\. Use a shorter date range\./);
     expect(audit.entries[0]).toMatchObject({ outcome: "rejected", error: "PolicyError record_limit" });
   });
+
+  it("does not count holidays toward the limit", async () => {
+    const api = fakeApi({
+      getWhosOut: vi.fn(async () => [
+        { id: 1, type: "timeOff" as const, employeeId: 7, name: "Anna", start: TODAY, end: TODAY },
+        { id: 2, type: "holiday" as const, name: "Holiday A", start: TODAY, end: TODAY },
+        { id: 3, type: "holiday" as const, name: "Holiday B", start: TODAY, end: TODAY },
+      ]),
+    });
+    const { client } = await connect(api, { settings: { maxRecords: 1 } });
+    const res = await client.callTool({ name: "bamboohr_whos_out", arguments: {} });
+    expect(res.isError).toBeFalsy();
+    expect(parseToolPayload(res)).toHaveLength(3);
+  });
 });
 
 describe("bamboohr_list_employees", () => {
@@ -235,7 +249,7 @@ describe("bamboohr_vacation_overview", () => {
     // The message quotes BambooHR's own type names: it is fenced like any other payload.
     const body = JSON.parse(envelopeBody(toolText(res)));
     expect(body.error).toMatch(/No time-off type matches "Sabbatical"/);
-    expect(body.availableTypes.map((t: any) => t.id)).toEqual(["78", "1"]);
+    expect(body.availableTypes.map((t: any) => t.id)).toEqual(["78"]); // "Sick leave" is hidden
     expect(audit.entries[0]).toMatchObject({ outcome: "error", error: "VacationTypeNotFoundError" });
   });
 });

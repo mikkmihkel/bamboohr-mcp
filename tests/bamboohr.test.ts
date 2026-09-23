@@ -164,30 +164,36 @@ describe("createBambooHRApi", () => {
     ]);
   });
 
-  it("getHolidays follows pages and filters by overlap", async () => {
+  it("getHolidays follows pages and filters by overlap, keeping single-day holidays", async () => {
     const pages = [
-      { data: [{ id: 1, name: "New Year", startDate: "2026-01-01", endDate: "2026-01-01", isPublic: true }], meta: { page: 1, pageSize: 100, totalPages: 2, totalItems: 2 } },
+      { data: [
+        { id: 3, name: "Old Christmas", startDate: "2025-12-24", endDate: "2025-12-26", isPublic: true },
+        { id: 1, name: "New Year", startDate: "2026-01-01", endDate: null, isPublic: true },
+      ], meta: { page: 1, pageSize: 100, totalPages: 2, totalItems: 3 } },
       { data: [{ id: 2, name: "Midsummer", startDate: "2026-06-23", endDate: "2026-06-24", isPublic: true }], meta: { page: 2, pageSize: 100, totalPages: 2, totalItems: 2 } },
     ];
     const get = vi.fn(async () => pages.shift());
     const out = await createBambooHRApi({ get } as unknown as Client).getHolidays("2026-01-01", "2026-12-31");
     expect(get).toHaveBeenNthCalledWith(1, "/holidays", {
-      filter: "startDate le '2026-12-31' and endDate ge '2026-01-01'", orderBy: "startDate asc", pageSize: 100, page: 1,
+      filter: "startDate le '2026-12-31' and startDate ge '2024-12-31'", orderBy: "startDate asc", pageSize: 100, page: 1,
     });
     expect(get).toHaveBeenCalledTimes(2);
     expect(out.map((h) => h.name)).toEqual(["New Year", "Midsummer"]);
+    expect(out[0].endDate).toBe("2026-01-01");
   });
 
   it("getUsers flattens the id-keyed object", async () => {
     const { client, get } = clientReturning({
       "11": { id: "11", employeeId: "7", firstName: "Anna", lastName: "Tamm", email: "anna@example.com", status: "enabled", lastLogin: "2026-09-01T08:00:00+00:00" },
       "12": { id: "12", employeeId: null, firstName: "Svc", lastName: "Acct", email: null, status: "disabled" },
+      "13": { id: "13", employeeId: 0, firstName: "No", lastName: "Record", email: "home@example.com", status: "enabled" },
     });
     const out = await createBambooHRApi(client).getUsers("enabled");
     expect(get).toHaveBeenCalledWith("/meta/users", { status: "enabled" });
     expect(out).toEqual([
-      { userId: 11, employeeId: 7, firstName: "Anna", lastName: "Tamm", email: "anna@example.com", status: "enabled", lastLogin: "2026-09-01T08:00:00+00:00" },
+      { userId: 11, employeeId: 7, firstName: "Anna", lastName: "Tamm", status: "enabled", lastLogin: "2026-09-01T08:00:00+00:00" },
       { userId: 12, firstName: "Svc", lastName: "Acct", status: "disabled" },
+      { userId: 13, firstName: "No", lastName: "Record", status: "enabled" },
     ]);
   });
   it("getEmployee joins fields, uses onlyCurrent and returns raw values", async () => {

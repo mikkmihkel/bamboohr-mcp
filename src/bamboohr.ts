@@ -1,5 +1,5 @@
 import type { Client } from "./client";
-import type { ISODate } from "./dates";
+import { addDays, type ISODate } from "./dates";
 import { compact } from "./fields";
 import type {
   BambooUser,
@@ -218,14 +218,19 @@ export function createBambooHRApi(client: Client): BambooHRApi {
       let page = 1;
       let totalPages = 1;
       do {
+        // Single-day holidays have a null endDate, and the filter grammar has no
+        // `or`, so `endDate ge start` would drop them. Filter on startDate only,
+        // with a year of look-back for multi-day holidays, and check overlap below.
         const raw = await client.get<{ data?: Raw[]; meta?: Raw }>("/holidays", {
-          filter: `startDate le '${end}' and endDate ge '${start}'`,
+          filter: `startDate le '${end}' and startDate ge '${addDays(start, -366)}'`,
           orderBy: "startDate asc",
           pageSize: 100,
           page,
         });
         for (const h of raw.data ?? []) {
-          out.push({ id: Number(h.id), name: str(h.name) ?? "", startDate: h.startDate, endDate: h.endDate ?? h.startDate, isPublic: Boolean(h.isPublic) });
+          const endDate = h.endDate ?? h.startDate;
+          if (endDate < start) continue;
+          out.push({ id: Number(h.id), name: str(h.name) ?? "", startDate: h.startDate, endDate, isPublic: Boolean(h.isPublic) });
         }
         totalPages = Number(raw.meta?.totalPages ?? 1);
         page += 1;
@@ -242,9 +247,10 @@ export function createBambooHRApi(client: Client): BambooHRApi {
           lastName: str(u.lastName) ?? "",
           status: str(u.status) ?? "",
         };
+        // 0 means "no linked employee"; passed on, it would read as the key owner's own record.
         const employeeId = num(u.employeeId);
-        if (employeeId !== undefined) user.employeeId = employeeId;
-        if (str(u.email)) user.email = str(u.email);
+        if (employeeId !== undefined && employeeId > 0) user.employeeId = employeeId;
+        // email is not passed on: BambooHR falls back to the home email when a user has no work email.
         if (str(u.lastLogin)) user.lastLogin = str(u.lastLogin);
         return user;
       });
