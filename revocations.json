@@ -1,10 +1,12 @@
 {
   "$comment": "Version revocation list read by the bamboohr-mcp start-up self-check (task 10). Organisations should host their own copy on an internal HTTPS endpoint and point BAMBOOHR_REVOCATION_URL / `enroll --revocation-url` at it. A version listed in revokedVersions, or lower than minimumVersion, serves no data and tells the user to update.",
   "schemaVersion": 1,
-  "minimumVersion": "4.0.1",
+  "minimumVersion": "4.2.0",
   "revokedVersions": [
     "3.0.0",
-    "4.0.0"
+    "4.0.0",
+    "4.0.1",
+    "4.1.0"
   ],
-  "message": "Versions before 4.0.1 either read the API key from the Claude Desktop config (3.x) or fail to answer the MCP initialize request under Claude Desktop (4.0.0). Install the latest release."
+  "message": "Versions before 4.2.0 can read sensitive BambooHR tables (earnings, passports, visas, credit cards, COVID records) and may return home email addresses. Install the latest release: https://github.com/mikkmihkel/bamboohr-mcp/releases/latest"
 }
