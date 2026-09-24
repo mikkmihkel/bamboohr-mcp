@@ -100,7 +100,8 @@ export async function buildVacationOverview(
     const requested = input.timeOffType ?? opts.envVacationType;
     const candidates = requested ? [] : matchDefaultVacationTypes(timeOffTypes);
     if (candidates.length > 1) throw new VacationTypeNotFoundError(undefined, candidates, "ambiguous");
-    throw new VacationTypeNotFoundError(requested, timeOffTypes);
+    // Health-related types are hidden here as they are in bamboohr_list_time_off_types.
+    throw new VacationTypeNotFoundError(requested, timeOffTypes.filter((t) => !isSickType(t.name)));
   }
   // A health-related type can never be "the vacation type": this report names every employee,
   // their balance and every absence block, which for sick leave is a health record.

@@ -135,7 +135,7 @@ describe("buildVacationOverview", () => {
   it("throws VacationTypeNotFoundError listing available types", async () => {
     const err = await buildVacationOverview(fakeApi(), { timeOffType: "Sabbatical" }, { today: TODAY }).catch((e) => e);
     expect(err).toBeInstanceOf(VacationTypeNotFoundError);
-    expect(err.available.map((t: any) => t.name)).toEqual(["Sick", "Vacation"]);
+    expect(err.available.map((t: any) => t.name)).toEqual(["Vacation"]); // "Sick" is hidden
   });
 
   it("refuses to guess when several types match the default vacation pattern", async () => {

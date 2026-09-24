@@ -183,7 +183,34 @@ const BLOCKED_TABLE_PATTERNS: readonly RegExp[] = [
   /emergency/i,
   /dependents?/i,
   /benefit/i,
+  /earning/i,
+  /pay.?rate/i,
+  /stock/i,
+  /equity/i,
+  /levels?and.?bands?/i,
+  /passport/i,
+  /visa/i,
+  /driver/i,
+  /credit.?card/i,
+  /covid/i,
+  /vaccin/i,
+  /contact/i,
 ];
+
+/**
+ * Standard (non-custom) tables that may be read. Every other standard table is refused,
+ * so a table BambooHR adds later is closed until it is reviewed. Custom tables (alias
+ * `custom...`) pass when their alias matches no blocked pattern; their columns are
+ * checked one by one with isBlockedColumn.
+ */
+export const ALLOWED_STANDARD_TABLES: ReadonlySet<string> = new Set([
+  "jobInfo",
+  "jobInformation",
+  "employmentStatus",
+  "employeeEducation",
+  "employeeCertifications",
+  "employeeAssets",
+]);
 
 /** Lower-cases and drops separators so "National ID" and "national_id" look like "nationalid". */
 function normalise(key: string): string {
@@ -203,7 +230,37 @@ export function isBlockedKey(key: string): boolean {
 
 /** True when an employee table alias (standard or custom) must not be read. */
 export function isBlockedTable(alias: string): boolean {
-  return matchesAny(BLOCKED_TABLE_PATTERNS, alias);
+  if (matchesAny(BLOCKED_TABLE_PATTERNS, alias)) return true;
+  return !/^custom/i.test(alias) && !ALLOWED_STANDARD_TABLES.has(alias);
+}
+
+/** True when a table column must not be read: a blocked BambooHR type or a sensitive name. */
+export function isBlockedColumn(column: { name: string; alias?: string; type?: string }): boolean {
+  const type = typeof column.type === "string" ? column.type.trim().toLowerCase() : "";
+  if (type !== "" && BLOCKED_FIELD_TYPES.has(type)) return true;
+  return isBlockedKey(column.name) || (column.alias !== undefined && isBlockedKey(column.alias));
+}
+
+/**
+ * Splits a table's columns into the ones that may be shown and the row keys to drop.
+ * Row keys are matched on the column alias, name and id, since the rows endpoint is not
+ * consistent about which of them it uses.
+ */
+export function tableColumnPolicy<C extends { id: string; name: string; alias?: string; type?: string }>(
+  columns: readonly C[]
+): { allowed: C[]; blockedKeys: Set<string> } {
+  const allowed: C[] = [];
+  const blockedKeys = new Set<string>();
+  for (const c of columns) {
+    if (!isBlockedColumn(c)) {
+      allowed.push(c);
+      continue;
+    }
+    blockedKeys.add(c.id);
+    blockedKeys.add(c.name);
+    if (c.alias) blockedKeys.add(c.alias);
+  }
+  return { allowed, blockedKeys };
 }
 
 export interface FieldLookup {

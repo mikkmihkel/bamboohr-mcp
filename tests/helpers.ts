@@ -95,8 +95,8 @@ export function fakeApi(overrides: Partial<BambooHRApi> = {}): BambooHRApi {
     ]),
     getHolidays: vi.fn(async () => []),
     getUsers: vi.fn(async () => [
-      { userId: 1, employeeId: 7, firstName: "Anna", lastName: "Tamm", email: "anna@acme.test", status: "enabled" },
-      { userId: 2, employeeId: 8, firstName: "Mart", lastName: "Mets", email: "mart@acme.test", status: "disabled" },
+      { userId: 1, employeeId: 7, firstName: "Anna", lastName: "Tamm", status: "enabled" },
+      { userId: 2, employeeId: 8, firstName: "Mart", lastName: "Mets", status: "disabled" },
     ]),
     getEmployee: vi.fn(async (id: number) => ({
       id,

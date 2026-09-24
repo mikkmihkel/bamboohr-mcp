@@ -14,6 +14,7 @@ import {
   type FieldLookup,
 } from "../policy";
 import type { Settings } from "../settings";
+import type { TableMeta } from "../types";
 
 export const READ_ONLY = {
   readOnlyHint: true,
@@ -38,8 +39,8 @@ export interface ToolContext {
   audit: AuditLog;
   /** Field metadata behind a short TTL cache, shared by every tool. */
   fieldMeta: () => Promise<FieldLookup[]>;
-  /** Table aliases behind the same cache, already filtered through the policy block-list. */
-  tableAliases: () => Promise<string[]>;
+  /** Table metadata behind the same cache, blocked tables already removed (columns are not). */
+  tables: () => Promise<TableMeta[]>;
 }
 
 /**

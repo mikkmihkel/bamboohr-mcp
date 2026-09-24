@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.2.0 (2026-09-23)
+
+### Fixed
+
+- **Standard tables are now allow-listed.** `bamboohr_table_rows` could read standard tables the block-list did not name: `earnings`, `employeeProjectPayRates`, `levelsAndBands`, stock options and equity grants, passports, visas, driver licences, credit cards and the four COVID tables. Standard tables are now closed unless listed (`jobInfo`, `jobInformation`, `employmentStatus`, `employeeEducation`, `employeeCertifications`, `employeeAssets`), custom tables are checked against a wider name list, and columns with a money or id type or a sensitive name are dropped from rows and from `bamboohr_list_tables`.
+- **`bamboohr_list_users` no longer returns email.** BambooHR fills it with the home email when a user has no work email. A user with no linked employee (`employeeId` 0) no longer carries an id that other tools read as "the key owner".
+- **Single-day company holidays were missing.** BambooHR returns them with a null `endDate`, which the `endDate ge` filter never matched. The overlap check now runs locally.
+- **Start-up no longer blocks `initialize`.** The revocation check and the credential-store lookup (which can wait on a keychain unlock prompt) now run after the MCP connection is up; tool calls wait for them instead.
+- **A revoked version, an unreachable list under strict self-check, or an unreadable `config.json` no longer exits the process.** The server stays up and every tool call answers with the reason, instead of Claude Desktop showing only a failed connector. `config.json` is written atomically.
+- The vacation-type error listed health-related time-off types by name; it now hides them like `bamboohr_list_time_off_types` does.
+
+### Changed
+
+- Holidays no longer count toward the per-call record cap of `bamboohr_whos_out`.
+- User documentation is shorter: `README.md` and `README.et.md` are user guides, the technical reference moved to `docs/ADMIN.md`, and `docs/PAIGALDUSJUHEND.md` merged into `README.et.md`.
+
 ## 4.1.0 (2026-09-22)
 
 ### Fixed

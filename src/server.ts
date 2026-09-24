@@ -53,8 +53,7 @@ export function createServer(api: BambooHRApi, options: ServerOptions = {}): Mcp
     // FieldMeta carries the BambooHR field `type`, which the policy needs: a custom field of
     // type currency/ssn/gender is refused however innocuous its name is.
     fieldMeta: () => cache.get("fields", () => api.getFields()),
-    tableAliases: () =>
-      cache.get("tables", async () => (await api.getTables()).map((t) => t.alias).filter((a) => !isBlockedTable(a))),
+    tables: () => cache.get("tables", async () => (await api.getTables()).filter((t) => !isBlockedTable(t.alias))),
   };
 
   timeOff.register(server, ctx);

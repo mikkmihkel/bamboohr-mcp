@@ -176,7 +176,6 @@ export interface BambooUser {
   employeeId?: number;
   firstName: string;
   lastName: string;
-  email?: string;
   status: string;
   lastLogin?: string;
 }

@@ -308,7 +308,7 @@ async function doctor(argv: string[], deps: CliDeps): Promise<number> {
     deps.stdout(`[fail] self-check: ${result.reason}`);
     exit = EXIT_REVOKED;
   } else if (settings.strictSelfCheck) {
-    deps.stdout(`[fail] self-check: ${result.reason} (strictSelfCheck is on, the server would refuse to start)`);
+    deps.stdout(`[fail] self-check: ${result.reason} (strictSelfCheck is on, the server would serve no data)`);
     if (exit === EXIT_OK) exit = EXIT_PROBLEM;
   } else {
     deps.stdout(`[warn] self-check: ${result.reason} (strictSelfCheck is off, the server would still start)`);

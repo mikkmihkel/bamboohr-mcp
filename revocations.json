@@ -1,5 +1,5 @@
 {
-  "$comment": "Version revocation list read by the bamboohr-mcp start-up self-check (task 10). Organisations should host their own copy on an internal HTTPS endpoint and point BAMBOOHR_REVOCATION_URL / `enroll --revocation-url` at it. A version listed in revokedVersions, or lower than minimumVersion, refuses to start.",
+  "$comment": "Version revocation list read by the bamboohr-mcp start-up self-check (task 10). Organisations should host their own copy on an internal HTTPS endpoint and point BAMBOOHR_REVOCATION_URL / `enroll --revocation-url` at it. A version listed in revokedVersions, or lower than minimumVersion, serves no data and tells the user to update.",
   "schemaVersion": 1,
   "minimumVersion": "4.0.1",
   "revokedVersions": [
